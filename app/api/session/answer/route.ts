@@ -1,9 +1,32 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { chat } from "@/lib/openrouter";
+import { modelFor } from "@/lib/models";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+
+// Tolerant parse: models sometimes wrap JSON in ```fences``` or add prose.
+function parseJudge(raw: string): { score?: number; feedback?: string } | null {
+  if (!raw) return null;
+  let txt = raw.trim();
+  const fence = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) txt = fence[1].trim();
+  try {
+    return JSON.parse(txt);
+  } catch {
+    // Grab the first {...} block if there's surrounding prose.
+    const obj = txt.match(/\{[\s\S]*\}/);
+    if (obj) {
+      try {
+        return JSON.parse(obj[0]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
 
 // POST { qi, chosen, followup } -> grade one question (MCQ + LLM-judged follow-up).
 export async function POST(req: Request) {
@@ -60,12 +83,16 @@ Mentee's typed answer: "${followup}"
 Return JSON: {"score": <0-100>, "feedback": "1-2 sentences"}`,
           },
         ],
-        { json: true, temperature: 0.3, maxTokens: 200, timeoutMs: 30000 }
+        { model: modelFor("judge"), json: true, temperature: 0.3, maxTokens: 200, timeoutMs: 30000 }
       );
-      const parsed = JSON.parse(raw);
-      judge = { score: Math.max(0, Math.min(100, parsed.score ?? 0)), feedback: parsed.feedback || "" };
+      const parsed = parseJudge(raw);
+      if (parsed) {
+        judge = { score: Math.max(0, Math.min(100, parsed.score ?? 0)), feedback: parsed.feedback || "" };
+      } else {
+        judge = { score: mcqCorrect ? 60 : 30, feedback: "Answer saved — automatic grading was unavailable this time." };
+      }
     } catch {
-      judge = { score: mcqCorrect ? 60 : 30, feedback: "(couldn't grade the written answer)" };
+      judge = { score: mcqCorrect ? 60 : 30, feedback: "Answer saved — automatic grading was unavailable this time." };
     }
   }
 
