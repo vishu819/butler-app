@@ -16,6 +16,8 @@ type News = { items: { title: string; url: string }[]; digest: string };
 export default function DailyCards() {
   const [content, setContent] = useState<Record<string, any>>({});
   const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [genErr, setGenErr] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/today")
@@ -26,26 +28,76 @@ export default function DailyCards() {
       });
   }, []);
 
+  async function generateQuiz(force = false) {
+    setGenerating(true);
+    setGenErr(null);
+    // On regenerate, clear the visible quiz so QuizRunner remounts fresh.
+    if (force) setContent((c) => ({ ...c, eng_q: undefined }));
+    try {
+      const res = await fetch(`/api/generate-quiz${force ? "?force=1" : ""}`, {
+        method: "POST",
+      });
+      // Read as text first so an empty/non-JSON body can't throw "Unexpected end of JSON input".
+      const text = await res.text();
+      const j = text ? JSON.parse(text) : {};
+      if (res.ok && j.quiz) {
+        setContent((c) => ({ ...c, eng_q: j.quiz }));
+      } else {
+        setGenErr(j.error || `Generation failed (${res.status}). Please try again.`);
+      }
+    } catch {
+      setGenErr("Something went wrong generating the quiz. Please try again.");
+    } finally {
+      setGenerating(false);
+    }
+  }
+
   if (loading) return <p className="text-sm text-gray-400">Loading today&apos;s content…</p>;
 
   const quiz = content.eng_q as Quiz | undefined;
   const gym = content.brain_gym as BrainGym | undefined;
   const news = content.news as News | undefined;
 
-  const empty = !quiz && !gym && !news;
-
   return (
     <div className="space-y-4">
-      {empty && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 p-4 text-sm dark:border-amber-700 dark:bg-amber-900/20">
-          No daily content yet for today. Trigger the generator once (see README) — after that
-          Vercel Cron fills it automatically each morning.
-        </div>
-      )}
-
-      {quiz && quiz.questions?.length > 0 && (
-        <Card icon="🏛️" title="Daily Quiz" tag={`${quiz.questions.length} Q`}>
+      {/* Quiz: show it, or a generate/loader state */}
+      {quiz && quiz.questions?.length > 0 ? (
+        <Card
+          icon="🏛️"
+          title="Daily Quiz"
+          tag={`${quiz.questions.length} Q`}
+          action={
+            <button
+              onClick={() => generateQuiz(true)}
+              disabled={generating}
+              className="rounded-lg border border-gray-300 px-2.5 py-1 text-xs text-gray-600 hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+            >
+              {generating ? "…" : "↻ Regenerate"}
+            </button>
+          }
+        >
           <QuizRunner quiz={quiz} />
+        </Card>
+      ) : (
+        <Card icon="🏛️" title="Daily Quiz">
+          {generating ? (
+            <div className="flex flex-col items-center gap-3 py-6">
+              <Spinner />
+              <p className="text-sm text-gray-500">Generating today&apos;s 10 questions…</p>
+              <p className="text-xs text-gray-400">This takes ~10-20 seconds.</p>
+            </div>
+          ) : (
+            <div className="py-4 text-center">
+              <p className="mb-3 text-sm text-gray-500">No quiz for today yet.</p>
+              <button
+                onClick={() => generateQuiz(false)}
+                className="rounded-xl bg-brand-500 px-5 py-2.5 text-sm font-medium text-white active:scale-[.99]"
+              >
+                Generate today&apos;s quiz
+              </button>
+              {genErr && <p className="mt-2 text-xs text-red-500">{genErr}</p>}
+            </div>
+          )}
         </Card>
       )}
 
@@ -90,15 +142,27 @@ export default function DailyCards() {
   );
 }
 
+function Spinner() {
+  return (
+    <div
+      className="h-8 w-8 animate-spin rounded-full border-2 border-gray-300 border-t-brand-500 dark:border-gray-700 dark:border-t-brand-400"
+      role="status"
+      aria-label="Loading"
+    />
+  );
+}
+
 function Card({
   icon,
   title,
   tag,
+  action,
   children,
 }: {
   icon: string;
   title: string;
   tag?: string;
+  action?: React.ReactNode;
   children: React.ReactNode;
 }) {
   return (
@@ -107,10 +171,11 @@ function Card({
         <span className="text-lg">{icon}</span>
         <h2 className="font-semibold">{title}</h2>
         {tag && (
-          <span className="ml-auto rounded-full bg-gray-100 px-2 py-0.5 text-[10px] uppercase text-gray-500 dark:bg-gray-800">
+          <span className="rounded-full bg-gray-100 px-2 py-0.5 text-[10px] uppercase text-gray-500 dark:bg-gray-800">
             {tag}
           </span>
         )}
+        {action && <div className="ml-auto">{action}</div>}
       </div>
       {children}
     </section>
@@ -243,6 +308,7 @@ function QuizRunner({ quiz }: { quiz: Quiz }) {
                 {q.explanation}
               </p>
             )}
+            <LearnThis concept={q.concept} question={q.question} />
           </div>
         );
       })}
@@ -262,6 +328,151 @@ function QuizRunner({ quiz }: { quiz: Quiz }) {
         </div>
       )}
     </div>
+  );
+}
+
+function LearnThis({ concept, question }: { concept: string; question: string }) {
+  const [loading, setLoading] = useState(false);
+  const [article, setArticle] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+
+  async function learn() {
+    if (article !== null) {
+      setArticle(null); // toggle closed
+      return;
+    }
+    setLoading(true);
+    setErr(null);
+    setArticle(""); // open the panel; fills as it streams
+    try {
+      const res = await fetch("/api/learn", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ concept, question }),
+      });
+      if (!res.ok || !res.body) {
+        setErr(`Couldn't load article (${res.status}).`);
+        setArticle(null);
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        setArticle(acc);
+      }
+      if (!acc) {
+        setErr("Empty response. Please try again.");
+        setArticle(null);
+      }
+    } catch {
+      setErr("Something went wrong. Please try again.");
+      setArticle(null);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="mt-2">
+      <button
+        onClick={learn}
+        disabled={loading}
+        className="inline-flex items-center gap-1 rounded-lg border border-brand-300 px-2.5 py-1 text-xs font-medium text-brand-700 hover:bg-brand-50 disabled:opacity-60 dark:border-brand-700 dark:text-brand-300 dark:hover:bg-brand-700/20"
+      >
+        {loading ? (
+          <>
+            <MiniSpinner /> Writing article…
+          </>
+        ) : article !== null ? (
+          "▾ Hide article"
+        ) : (
+          "📖 Learn this topic"
+        )}
+      </button>
+      {err && <p className="mt-1 text-xs text-red-500">{err}</p>}
+      {article !== null && (
+        <div className="mt-2 rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-gray-800 dark:bg-gray-800/50">
+          <Markdown text={article} />
+          {!loading && article && (
+            <p className="mt-2 text-[10px] text-gray-400">Saved to your Library.</p>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function MiniSpinner() {
+  return (
+    <span className="inline-block h-3 w-3 animate-spin rounded-full border-[1.5px] border-brand-300 border-t-brand-600" />
+  );
+}
+
+// Minimal Markdown renderer: ## headings, - bullets, **bold**, paragraphs.
+function Markdown({ text }: { text: string }) {
+  const lines = text.split("\n");
+  const out: React.ReactNode[] = [];
+  let list: string[] = [];
+  const flush = () => {
+    if (list.length) {
+      out.push(
+        <ul key={`ul${out.length}`} className="my-1 list-disc pl-5 text-xs text-gray-600 dark:text-gray-300">
+          {list.map((li, i) => (
+            <li key={i}>{inline(li)}</li>
+          ))}
+        </ul>
+      );
+      list = [];
+    }
+  };
+  lines.forEach((raw, i) => {
+    const line = raw.trim();
+    if (!line) {
+      flush();
+      return;
+    }
+    if (line.startsWith("## ")) {
+      flush();
+      out.push(
+        <h4 key={`h${i}`} className="mt-2 text-xs font-bold uppercase tracking-wide text-gray-500">
+          {line.slice(3)}
+        </h4>
+      );
+    } else if (line.startsWith("# ")) {
+      flush();
+      out.push(
+        <h3 key={`h${i}`} className="text-sm font-bold">
+          {line.slice(2)}
+        </h3>
+      );
+    } else if (line.startsWith("- ") || line.startsWith("* ")) {
+      list.push(line.slice(2));
+    } else {
+      flush();
+      out.push(
+        <p key={`p${i}`} className="my-1 text-xs text-gray-700 dark:text-gray-300">
+          {inline(line)}
+        </p>
+      );
+    }
+  });
+  flush();
+  return <div>{out}</div>;
+}
+
+// Handle **bold** inside a line.
+function inline(s: string): React.ReactNode {
+  const parts = s.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((p, i) =>
+    p.startsWith("**") && p.endsWith("**") ? (
+      <strong key={i}>{p.slice(2, -2)}</strong>
+    ) : (
+      <span key={i}>{p}</span>
+    )
   );
 }
 

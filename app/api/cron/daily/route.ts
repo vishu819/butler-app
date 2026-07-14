@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { chat } from "@/lib/openrouter";
+import { buildSkillState, generateQuiz, QUIZ_TITLE } from "@/lib/quiz-gen";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -26,93 +27,38 @@ export async function GET(req: Request) {
   const results: Record<string, string> = {};
   const rows: { content_date: string; type: string; payload: unknown }[] = [];
 
-  // ---- Daily quiz: 10 adaptive MCQs on architect fundamentals ----
+  // ---- Daily quiz: 10 adaptive, skill-targeted MCQs (same engine as on-demand) ----
   if (!have.has("eng_q")) {
     try {
-      // Last ~10 days of quizzes -> avoid repeating the concepts we've asked.
+      // Single-user app: load the (one) user's skill profile to target weaknesses.
+      const { data: prof } = await admin.from("profiles").select("id").limit(1).maybeSingle();
+      const { data: profileRows } = prof
+        ? await admin
+            .from("skill_profile")
+            .select("skill, level, proficiency, seen")
+            .eq("user_id", prof.id)
+        : { data: [] as any[] };
+      const skillState = buildSkillState(profileRows || []);
+
+      // Avoid repeating recent questions.
       const { data: recentQuizzes } = await admin
         .from("daily_content")
         .select("payload")
         .eq("type", "eng_q")
         .order("content_date", { ascending: false })
-        .limit(10);
-      const askedConcepts = (recentQuizzes || [])
+        .limit(7);
+      const askedQuestions = (recentQuizzes || [])
         .flatMap((r) => (r.payload as any)?.questions || [])
-        .map((q: any) => q?.concept)
-        .filter(Boolean);
+        .map((q: any) => q?.question)
+        .filter(Boolean)
+        .slice(0, 40);
 
-      // Recent quiz performance -> target weak areas.
-      const { data: recentResults } = await admin
-        .from("quiz_results")
-        .select("score, total, weak_concepts")
-        .order("quiz_date", { ascending: false })
-        .limit(10);
-      const weakConcepts = Array.from(
-        new Set((recentResults || []).flatMap((r) => r.weak_concepts || []))
-      ).slice(0, 15);
-      const avgPct =
-        recentResults && recentResults.length
-          ? Math.round(
-              (recentResults.reduce(
-                (s, r) => s + (r.total ? (r.score ?? 0) / r.total : 0),
-                0
-              ) /
-                recentResults.length) *
-                100
-            )
-          : null;
-
-      const adaptContext = `Concepts already tested recently (avoid repeating these exact concepts): ${
-        askedConcepts.join(", ") || "(none yet)"
-      }
-
-Learner's weak areas from past quizzes (INCLUDE at least 3 questions targeting these): ${
-        weakConcepts.join(", ") || "(none identified yet)"
-      }
-Recent average: ${avgPct ?? "n/a"}%. ${
-        avgPct == null
-          ? "No history — cover solid fundamentals broadly."
-          : avgPct >= 80
-          ? "Doing well — raise difficulty, include a few deeper/edge-case questions."
-          : avgPct < 60
-          ? "Struggling — reinforce weak areas at a clear, foundational depth."
-          : "Steady, challenging level."
-      }`;
-
-      const sys =
-        "You are a software-architecture tutor creating multiple-choice quiz questions for a senior engineer becoming a great software architect. Cover broad architect fundamentals: distributed systems, databases & data modeling, API design, caching, concurrency & consistency, networking, security, messaging/queues, observability, scalability tradeoffs. Questions must be SPECIFIC and concrete (not open-ended 'design X' prompts) — answerable by tapping one option. Each explanation must teach the underlying KEY CONCEPT in depth (why the right answer is right, why the tempting wrong ones are wrong, and the principle to remember). Return JSON only.";
-
-      // Generate in two parallel batches of 5 — faster and more reliable than one big call.
-      const batchPrompt = (n: number, focus: string) => `${adaptContext}
-
-Produce ${n} quiz questions (${focus}) as JSON:
-{"questions":[{"concept":"short tag e.g. 'CAP theorem'","question":"specific question","options":["A","B","C","D"],"correct":0,"explanation":"3-5 sentences teaching the key concept in depth: why the correct option is right, why tempting wrong picks are wrong, and the principle to remember."}]}
-Exactly ${n} questions, exactly 4 options each, vary the correct index, keep them independent and unambiguous.`;
-
-      const [b1, b2] = await Promise.all([
-        chat(
-          [
-            { role: "system", content: sys },
-            { role: "user", content: batchPrompt(5, "covering distributed systems, databases, API design, caching, concurrency") },
-          ],
-          { json: true, temperature: 0.8, maxTokens: 2200, timeoutMs: 55000 }
-        ),
-        chat(
-          [
-            { role: "system", content: sys },
-            { role: "user", content: batchPrompt(5, "covering networking, security, messaging/queues, observability, scalability tradeoffs") },
-          ],
-          { json: true, temperature: 0.85, maxTokens: 2200, timeoutMs: 55000 }
-        ),
-      ]);
-
-      const q1 = (JSON.parse(b1).questions || []) as unknown[];
-      const q2 = (JSON.parse(b2).questions || []) as unknown[];
-      const questions = [...q1, ...q2];
+      const questions = await generateQuiz(skillState, askedQuestions);
+      if (questions.length === 0) throw new Error("no valid questions returned");
       rows.push({
         content_date: today,
         type: "eng_q",
-        payload: { title: "Architecture Fundamentals — Daily Quiz", questions },
+        payload: { title: QUIZ_TITLE, questions },
       });
       results.eng_q = `ok (${questions.length} questions)`;
     } catch (e: any) {
@@ -184,7 +130,78 @@ Exactly ${n} questions, exactly 4 options each, vary the correct index, keep the
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
+  // ---- Summarize yesterday's chat into a durable daily_summary memory ----
+  try {
+    results.summary = await summarizeYesterday(admin);
+  } catch (e: any) {
+    results.summary = `error: ${e.message}`;
+  }
+
   return NextResponse.json({ date: today, results });
+}
+
+// Roll up the previous day's coach conversation into one long-term memory row,
+// so the coach carries continuity across days even after raw messages are pruned.
+// Single-user app: operates on the one profile's user id.
+async function summarizeYesterday(
+  admin: ReturnType<typeof createAdminClient>
+): Promise<string> {
+  // Yesterday's date range (UTC).
+  const now = new Date();
+  const start = new Date(now);
+  start.setUTCDate(start.getUTCDate() - 1);
+  start.setUTCHours(0, 0, 0, 0);
+  const end = new Date(start);
+  end.setUTCHours(23, 59, 59, 999);
+  const dayKey = start.toISOString().slice(0, 10);
+
+  // Single-user: pick the (one) profile.
+  const { data: prof } = await admin.from("profiles").select("id").limit(1).maybeSingle();
+  const userId = prof?.id;
+  if (!userId) return "skip: no user";
+
+  // Already summarized this day? (idempotent)
+  const tag = `[${dayKey}]`;
+  const { data: existing } = await admin
+    .from("memory")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("kind", "daily_summary")
+    .ilike("content", `${tag}%`)
+    .maybeSingle();
+  if (existing) return "exists";
+
+  // Fetch yesterday's messages.
+  const { data: msgs } = await admin
+    .from("chat_messages")
+    .select("role, content")
+    .eq("user_id", userId)
+    .gte("created_at", start.toISOString())
+    .lte("created_at", end.toISOString())
+    .order("created_at", { ascending: true })
+    .limit(200);
+  if (!msgs || msgs.length === 0) return "skip: no chat";
+
+  const transcript = msgs.map((m) => `${m.role}: ${m.content}`).join("\n");
+  const summary = await chat(
+    [
+      {
+        role: "system",
+        content:
+          "You compress a day's coaching conversation into a 2-3 sentence memory note for future context. Capture what the user worked on, any preferences/struggles/decisions revealed, and their focus. Write in third person, concise. No preamble.",
+      },
+      { role: "user", content: transcript.slice(0, 12000) },
+    ],
+    { temperature: 0.3, maxTokens: 200, timeoutMs: 30000 }
+  );
+
+  const { error } = await admin.from("memory").insert({
+    user_id: userId,
+    kind: "daily_summary",
+    content: `${tag} ${summary.trim()}`,
+  });
+  if (error) return `error: ${error.message}`;
+  return "ok";
 }
 
 type NewsItem = { title: string; url: string };

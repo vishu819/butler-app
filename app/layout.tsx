@@ -2,10 +2,10 @@ import type { Metadata, Viewport } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "PI — Personal Intelligence",
+  title: "Butler — Your Engineering Mentor",
   description: "Your daily growth companion",
   manifest: "/manifest.webmanifest",
-  appleWebApp: { capable: true, statusBarStyle: "default", title: "PI" },
+  appleWebApp: { capable: true, statusBarStyle: "default", title: "Butler" },
 };
 
 export const viewport: Viewport = {

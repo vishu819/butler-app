@@ -59,9 +59,9 @@ export default function LoginPage() {
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6">
       <div className="mb-8 text-center">
         <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-500 text-3xl">
-          🌱
+          🎩
         </div>
-        <h1 className="text-2xl font-bold">PI</h1>
+        <h1 className="text-2xl font-bold">Butler</h1>
         <p className="text-sm text-gray-500">Your personal growth companion</p>
       </div>
 

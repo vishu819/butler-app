@@ -1,19 +1,27 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 
-type Msg = { role: "user" | "assistant"; content: string };
+export type Msg = { role: "user" | "assistant"; content: string };
 
-export default function Coach() {
-  const [messages, setMessages] = useState<Msg[]>([
-    {
-      role: "assistant",
-      content:
-        "Hey — I'm PI, your coach. I remember our conversations and your goals. What's on your mind today? We can plan, reflect, or dig into an architecture problem.",
-    },
-  ]);
-  const [input, setInput] = useState("");
-  const [sending, setSending] = useState(false);
+export const GREETING: Msg = {
+  role: "assistant",
+  content:
+    "Hey — I'm Butler, your engineering mentor. I remember our conversations, your goals, and your skill profile. What's on your mind today? We can plan, reflect, or dig into an architecture problem.",
+};
+
+export default function Coach({
+  messages,
+  setMessages,
+  sending,
+  setSending,
+}: {
+  messages: Msg[];
+  setMessages: React.Dispatch<React.SetStateAction<Msg[]>>;
+  sending: boolean;
+  setSending: React.Dispatch<React.SetStateAction<boolean>>;
+}) {
+  const inputRef = useRef<HTMLInputElement>(null);
   const endRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -22,10 +30,11 @@ export default function Coach() {
 
   async function send(e: React.FormEvent) {
     e.preventDefault();
-    const text = input.trim();
+    const text = (inputRef.current?.value || "").trim();
     if (!text || sending) return;
-    setInput("");
-    setMessages((m) => [...m, { role: "user", content: text }]);
+    if (inputRef.current) inputRef.current.value = "";
+    // Add the user message + an empty assistant message we'll stream into.
+    setMessages((m) => [...m, { role: "user", content: text }, { role: "assistant", content: "" }]);
     setSending(true);
     try {
       const res = await fetch("/api/chat", {
@@ -33,13 +42,34 @@ export default function Coach() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text }),
       });
-      const json = await res.json();
-      setMessages((m) => [
-        ...m,
-        { role: "assistant", content: json.reply || json.error || "…" },
-      ]);
+      if (!res.body) throw new Error("no stream");
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let acc = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        acc += decoder.decode(value, { stream: true });
+        // Update the last (assistant) message with what we have so far.
+        setMessages((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: acc };
+          return copy;
+        });
+      }
+      if (!acc) {
+        setMessages((m) => {
+          const copy = [...m];
+          copy[copy.length - 1] = { role: "assistant", content: "Something went wrong — try again." };
+          return copy;
+        });
+      }
     } catch {
-      setMessages((m) => [...m, { role: "assistant", content: "Network error — try again." }]);
+      setMessages((m) => {
+        const copy = [...m];
+        copy[copy.length - 1] = { role: "assistant", content: "Network error — try again." };
+        return copy;
+      });
     } finally {
       setSending(false);
     }
@@ -48,26 +78,23 @@ export default function Coach() {
   return (
     <section className="flex min-h-[70dvh] flex-col">
       <div className="flex-1 space-y-3">
-        {messages.map((m, i) => (
-          <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
-            <div
-              className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm ${
-                m.role === "user"
-                  ? "bg-brand-500 text-white"
-                  : "border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
-              }`}
-            >
-              {m.content}
+        {messages.map((m, i) => {
+          const isLast = i === messages.length - 1;
+          const streamingEmpty = isLast && m.role === "assistant" && m.content === "" && sending;
+          return (
+            <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
+              <div
+                className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm ${
+                  m.role === "user"
+                    ? "bg-brand-500 text-white"
+                    : "border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
+                }`}
+              >
+                {streamingEmpty ? <span className="text-gray-400">thinking…</span> : m.content}
+              </div>
             </div>
-          </div>
-        ))}
-        {sending && (
-          <div className="flex justify-start">
-            <div className="rounded-2xl border border-gray-200 bg-white px-3.5 py-2.5 text-sm text-gray-400 dark:border-gray-800 dark:bg-gray-900">
-              thinking…
-            </div>
-          </div>
-        )}
+          );
+        })}
         <div ref={endRef} />
       </div>
 
@@ -77,8 +104,7 @@ export default function Coach() {
       >
         <div className="flex gap-2">
           <input
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
+            ref={inputRef}
             placeholder="Talk to your coach…"
             className="flex-1 rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900"
           />

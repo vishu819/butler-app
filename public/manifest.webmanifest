@@ -1,6 +1,6 @@
 {
-  "name": "PI — Personal Intelligence",
-  "short_name": "PI",
+  "name": "Butler — Your Engineering Mentor",
+  "short_name": "Butler",
   "description": "Your daily growth companion",
   "start_url": "/",
   "display": "standalone",
