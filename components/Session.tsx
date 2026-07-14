@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ChevronRight, HelpCircle, Sparkles } from "lucide-react";
+import { ArrowRight, ChevronRight, HelpCircle, Sparkles } from "lucide-react";
 import { toast } from "./ui/Toast";
 import { invalidate } from "@/lib/fetch-cache";
 import SessionResults from "./viz/SessionResults";
@@ -31,6 +31,7 @@ export default function Session() {
   const [responses, setResponses] = useState<Resp[]>([]);
   const [focus, setFocus] = useState<string[]>([]);
   const [idx, setIdx] = useState(0);
+  const [open, setOpen] = useState(false); // collapsed summary vs. expanded question flow
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -217,9 +218,64 @@ export default function Session() {
 
   const answeredCount = responses.length;
   const allAnswered = answeredCount >= questions.length;
+  const remaining = questions.length - answeredCount;
+
+  // Collapsed summary card — lime "Today's session" with an arrow (matches render).
+  // Shown until the user opens the flow. Once complete, we skip straight to the
+  // expanded view so the analysis banner is visible.
+  if (!open && status !== "complete") {
+    const done = answeredCount > 0;
+    return (
+      <button
+        onClick={() => setOpen(true)}
+        className="card-lime flex w-full items-center justify-between text-left transition-transform active:scale-[.99] animate-fade-up"
+      >
+        <div>
+          <p className="text-xs font-medium" style={{ color: "var(--accent-soft-ink)" }}>
+            Today&apos;s session
+          </p>
+          <p className="mt-0.5 text-lg font-bold leading-tight">
+            {done ? `${remaining} question${remaining === 1 ? "" : "s"} left` : `${questions.length} questions ready`}
+          </p>
+          {done && (
+            <div className="mt-2 flex items-center gap-2">
+              <div
+                className="h-1.5 w-28 overflow-hidden rounded-full"
+                style={{ background: "rgba(26,26,18,0.15)" }}
+              >
+                <span
+                  className="block h-full rounded-full"
+                  style={{ width: `${(answeredCount / questions.length) * 100}%`, background: "var(--accent-ink)" }}
+                />
+              </div>
+              <span className="text-xs font-semibold" style={{ color: "var(--accent-soft-ink)" }}>
+                {answeredCount}/{questions.length}
+              </span>
+            </div>
+          )}
+        </div>
+        <span
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+          style={{ background: "var(--charcoal)", color: "var(--accent-bright)" }}
+        >
+          <ArrowRight size={19} />
+        </span>
+      </button>
+    );
+  }
 
   return (
     <div className="space-y-3 animate-fade-up">
+      {/* Collapse back to the summary card */}
+      {status !== "complete" && (
+        <button
+          onClick={() => setOpen(false)}
+          className="text-xs font-medium"
+          style={{ color: "var(--muted)" }}
+        >
+          ← Collapse
+        </button>
+      )}
       {/* Completion / analysis banner */}
       {status === "complete" && (
         <div className="card" style={{ background: "var(--good-soft)" }}>
@@ -273,7 +329,7 @@ export default function Session() {
       {/* Progress */}
       <div className="flex items-center gap-2">
         <div className="bar flex-1">
-          <span style={{ width: `${((idx + 1) / questions.length) * 100}%`, background: "linear-gradient(90deg,#c9a86a,#a97f45)" }} />
+          <span style={{ width: `${((idx + 1) / questions.length) * 100}%` }} />
         </div>
         <span className="text-xs font-medium tabular-nums" style={{ color: "var(--muted)" }}>
           {idx + 1}/{questions.length} · {answeredCount} answered
@@ -287,7 +343,7 @@ export default function Session() {
             Lv {q.level}
           </span>
         </div>
-        <p className="mb-3 text-[15px] font-semibold leading-snug">{q.question}</p>
+        <p className="mb-3 text-[15px] font-medium leading-snug">{q.question}</p>
 
         {/* MCQ options */}
         <div className="space-y-2">

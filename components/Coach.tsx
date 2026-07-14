@@ -86,9 +86,10 @@ export default function Coach({
               <div
                 className={`max-w-[85%] whitespace-pre-wrap rounded-2xl px-3.5 py-2.5 text-sm ${
                   m.role === "user"
-                    ? "bg-brand-500 text-white"
-                    : "border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900"
+                    ? "text-white"
+                    : "border border-gray-200 bg-white"
                 }`}
+                style={m.role === "user" ? { background: "var(--charcoal)" } : undefined}
               >
                 {streamingEmpty ? <span className="text-gray-400">thinking…</span> : m.content}
               </div>
@@ -100,7 +101,8 @@ export default function Coach({
 
       <form
         onSubmit={send}
-        className="fixed inset-x-0 bottom-14 z-10 mx-auto max-w-2xl bg-gray-50 px-4 py-2 dark:bg-gray-950"
+        className="fixed inset-x-0 bottom-14 z-10 mx-auto max-w-2xl px-4 py-2"
+        style={{ background: "var(--bg-grad-2)" }}
       >
         <div className="flex gap-2">
           <input
@@ -108,10 +110,7 @@ export default function Coach({
             placeholder="Talk to your coach…"
             className="flex-1 rounded-2xl border border-gray-300 bg-white px-4 py-3 text-sm outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900"
           />
-          <button
-            disabled={sending}
-            className="rounded-2xl bg-brand-500 px-5 font-medium text-white disabled:opacity-60"
-          >
+          <button disabled={sending} className="btn-primary px-6">
             Send
           </button>
         </div>

@@ -149,7 +149,7 @@ export default function BrainGym() {
         {/* progress */}
         <div className="flex items-center gap-2">
           <div className="bar flex-1">
-            <span style={{ width: `${((idx + 1) / questions.length) * 100}%`, background: "linear-gradient(90deg,#c9a86a,#a97f45)" }} />
+            <span style={{ width: `${((idx + 1) / questions.length) * 100}%` }} />
           </div>
           <span className="text-xs font-medium tabular-nums" style={{ color: "var(--muted)" }}>
             {idx + 1}/{questions.length} · {score}✓

@@ -1,20 +1,16 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, Plus_Jakarta_Sans } from "next/font/google";
+import { Poppins } from "next/font/google";
 import "./globals.css";
 import ToastHost from "@/components/ui/Toast";
 
-// Body: Inter (clean, mobile-optimized). Headings/numbers: Plus Jakarta Sans
-// (crisper, more character). Both self-hosted — no network cost, no layout shift.
-const inter = Inter({
+// Poppins everywhere — rounded-geometric sans matching the app's visual identity.
+// Bound to both --font-inter (body) and --font-display (headings/numbers) so the
+// whole app uses one family. Self-hosted — no network cost, no layout shift.
+const poppins = Poppins({
   subsets: ["latin"],
   display: "swap",
-  variable: "--font-inter",
-});
-const jakarta = Plus_Jakarta_Sans({
-  subsets: ["latin"],
-  display: "swap",
-  weight: ["500", "600", "700", "800"],
-  variable: "--font-display",
+  weight: ["400", "500", "600", "700"],
+  variable: "--font-poppins",
 });
 
 export const metadata: Metadata = {
@@ -29,7 +25,7 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#b8925a",
+  themeColor: "#111112",
   width: "device-width",
   initialScale: 1,
   maximumScale: 1,
@@ -38,7 +34,7 @@ export const viewport: Viewport = {
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en" className={`${inter.variable} ${jakarta.variable}`}>
+    <html lang="en" className={poppins.variable}>
       <body className="min-h-dvh antialiased">
         {children}
         <ToastHost />

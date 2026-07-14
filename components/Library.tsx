@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calendar, Sparkles, Trash2 } from "lucide-react";
+import { Calendar, Sparkles, Trash2, ExternalLink } from "lucide-react";
 import Mermaid from "./Mermaid";
 import { cachedGet, invalidate } from "@/lib/fetch-cache";
 import { toast } from "./ui/Toast";
@@ -9,23 +9,33 @@ import { toast } from "./ui/Toast";
 type Day = { id: string; learn_date: string; summary: string; concepts: string[]; score: number | null; total: number | null };
 type Article = { id: string; concept: string; article: string; created_at: string };
 type Diagram = { id: string; concept: string; diagram: string; caption: string | null; created_at: string };
+type Bookmark = { id: string; title: string; url: string; source: string | null; created_at: string };
 
-type Tab = "journal" | "topics" | "diagrams";
+type Tab = "bookmarks" | "journal" | "topics" | "diagrams";
 
 export default function Library() {
-  const [tab, setTab] = useState<Tab>("journal");
+  const [tab, setTab] = useState<Tab>("bookmarks");
   const [days, setDays] = useState<Day[]>([]);
   const [articles, setArticles] = useState<Article[]>([]);
   const [diagrams, setDiagrams] = useState<Diagram[]>([]);
+  const [bookmarks, setBookmarks] = useState<Bookmark[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
+      cachedGet("/api/bookmarks").then((j) => setBookmarks(j.bookmarks || [])),
       cachedGet("/api/learning").then((j) => setDays(j.days || [])),
       cachedGet("/api/learn").then((j) => setArticles(j.articles || [])),
       cachedGet("/api/diagram").then((j) => setDiagrams(j.diagrams || [])),
     ]).finally(() => setLoading(false));
   }, []);
+
+  async function removeBookmark(id: string) {
+    setBookmarks((b) => b.filter((x) => x.id !== id));
+    invalidate("/api/bookmarks");
+    toast("Removed");
+    await fetch("/api/bookmarks", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ id }) }).catch(() => {});
+  }
 
   async function removeArticle(id: string) {
     setArticles((a) => a.filter((x) => x.id !== id));
@@ -55,6 +65,7 @@ export default function Library() {
       </div>
 
       <div className="segmented">
+        <button data-active={tab === "bookmarks"} onClick={() => setTab("bookmarks")}>Saved</button>
         <button data-active={tab === "journal"} onClick={() => setTab("journal")}>Journal</button>
         <button data-active={tab === "topics"} onClick={() => setTab("topics")}>Topics</button>
         <button data-active={tab === "diagrams"} onClick={() => setTab("diagrams")}>Diagrams</button>
@@ -62,6 +73,36 @@ export default function Library() {
 
       {loading ? (
         <div className="skeleton h-24 rounded-3xl" />
+      ) : tab === "bookmarks" ? (
+        bookmarks.length === 0 ? (
+          <Empty text="No saved links yet. Tap the bookmark icon on an AI News item to save it here." />
+        ) : (
+          <div className="space-y-2">
+            {bookmarks.map((b) => (
+              <div
+                key={b.id}
+                className="flex items-center gap-2 rounded-2xl border px-3 py-2.5"
+                style={{ borderColor: "rgba(0,0,0,0.07)" }}
+              >
+                <a href={b.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium" style={{ color: "var(--ink)" }}>
+                    {b.title}
+                  </span>
+                  <span className="flex items-center gap-1 text-[11px]" style={{ color: "var(--muted)" }}>
+                    <ExternalLink size={11} /> {b.source || hostname(b.url)}
+                  </span>
+                </a>
+                <button
+                  onClick={() => removeBookmark(b.id)}
+                  aria-label="Remove"
+                  className="shrink-0 rounded-lg p-1 text-gray-300 hover:bg-red-50 hover:text-red-500"
+                >
+                  <Trash2 size={15} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )
       ) : tab === "journal" ? (
         days.length === 0 ? (
           <Empty text="No journal entries yet. Each day Butler recaps what you learned here." />
@@ -129,6 +170,14 @@ export default function Library() {
 
 function Empty({ text }: { text: string }) {
   return <div className="card text-center text-sm" style={{ color: "var(--muted)" }}>{text}</div>;
+}
+
+function hostname(url: string): string {
+  try {
+    return new URL(url).hostname.replace(/^www\./, "");
+  } catch {
+    return "source";
+  }
 }
 
 function formatDate(iso: string): string {

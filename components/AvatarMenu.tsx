@@ -60,8 +60,8 @@ export default function AvatarMenu({ name }: { name: string }) {
       <button
         onClick={() => setOpen((o) => !o)}
         aria-label="Account"
-        className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold transition-transform active:scale-90"
-        style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+        className="flex h-9 w-9 items-center justify-center rounded-full text-sm font-bold transition-transform active:scale-90"
+        style={{ background: "var(--accent-bright)", color: "var(--accent-ink)" }}
       >
         {name.trim().charAt(0).toUpperCase() || "?"}
       </button>

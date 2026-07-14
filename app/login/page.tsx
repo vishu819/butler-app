@@ -58,15 +58,13 @@ export default function LoginPage() {
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6">
       <div className="mb-8 text-center animate-pop">
-        <div
-          className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl text-4xl"
-          style={{
-            background: "linear-gradient(135deg,#c9a86a,#a97f45)",
-            boxShadow: "0 16px 40px -12px rgba(169,127,69,.5)",
-          }}
-        >
-          🎩
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/icons/butler-logo.svg"
+          alt="Butler"
+          className="mx-auto mb-4 h-20 w-20 rounded-3xl"
+          style={{ boxShadow: "0 16px 40px -14px rgba(17,17,18,.5)" }}
+        />
         <h1 className="text-3xl font-bold tracking-tight">Butler</h1>
         <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
           Your engineering mentor

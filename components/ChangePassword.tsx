@@ -46,7 +46,7 @@ export default function ChangePassword() {
             />
             <button
               disabled={saving}
-              className="w-full rounded-lg bg-brand-500 px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
+              className="btn-primary w-full disabled:opacity-60"
             >
               {saving ? "Saving…" : "Update password"}
             </button>

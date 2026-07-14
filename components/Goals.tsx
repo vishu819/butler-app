@@ -109,7 +109,7 @@ export default function Goals() {
                     className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg border transition-all"
                     style={
                       g.done_today
-                        ? { background: "linear-gradient(135deg,#c9a86a,#a97f45)", borderColor: "transparent", color: "#fff" }
+                        ? { background: "var(--accent-bright)", borderColor: "transparent", color: "var(--accent-ink)" }
                         : { borderColor: "rgba(0,0,0,0.2)" }
                     }
                   >

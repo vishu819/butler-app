@@ -1,6 +1,8 @@
 import type { Config } from "tailwindcss";
 
 const config: Config = {
+  // Keep "class" strategy so stray `dark:` variants never trigger from OS
+  // preference — the app is intentionally light-only. We never add `.dark`.
   darkMode: "class",
   content: [
     "./app/**/*.{js,ts,jsx,tsx,mdx}",
@@ -10,14 +12,19 @@ const config: Config = {
     extend: {
       colors: {
         brand: {
-          50: "#faf6ee",
-          100: "#f2e8d5",
-          200: "#e6d4b0",
-          300: "#d6b985",
-          400: "#c9a86a",
-          500: "#b8925a",
-          600: "#a97f45",
-          700: "#8a6537",
+          50: "#f7fbe6",
+          100: "#eef7c9",
+          200: "#dcef95",
+          300: "#c8f135",
+          400: "#b6dd1f",
+          500: "#9dbf19",
+          600: "#7c9713",
+          700: "#5a6b0e",
+        },
+        charcoal: {
+          DEFAULT: "#111112",
+          soft: "#1c1c1e",
+          line: "#2a2a2c",
         },
       },
     },

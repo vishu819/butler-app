@@ -6,7 +6,8 @@ import ResetPanel from "./ResetPanel";
 import CountUp from "./ui/CountUp";
 import Plan from "./Plan";
 import SkillRadar from "./viz/SkillRadar";
-import { cachedGet, invalidate } from "@/lib/fetch-cache";
+import { SlidersHorizontal } from "lucide-react";
+import { cachedGet } from "@/lib/fetch-cache";
 
 type Skill = {
   key: string;
@@ -63,6 +64,16 @@ export default function Profile() {
 
   return (
     <div className="space-y-4 animate-fade-up">
+      <div className="flex items-center justify-between px-1">
+        <h2 className="text-lg font-bold">Progress</h2>
+        <span
+          className="flex h-8 w-8 items-center justify-center rounded-full"
+          style={{ background: "rgba(0,0,0,0.05)", color: "var(--muted)" }}
+        >
+          <SlidersHorizontal size={15} />
+        </span>
+      </div>
+
       {stats && (
         <StatHeader progress={stats.progress} rating={stats.rating} streak={stats.streak} />
       )}
@@ -112,7 +123,7 @@ export default function Profile() {
                     style={{
                       height: d.active ? 32 : 10,
                       background: d.active
-                        ? "linear-gradient(180deg,#c9a86a,#a97f45)"
+                        ? "var(--accent-bright)"
                         : "rgba(0,0,0,0.08)",
                     }}
                   />
@@ -155,36 +166,33 @@ export default function Profile() {
         )}
       </section>
 
-      <section className="card">
-        <h3 className="mb-3 font-semibold">Skill map</h3>
-        <SkillRadar skills={skills.map((s) => ({ key: s.key, label: s.label, proficiency: s.proficiency }))} />
-        <div className="mt-2 space-y-3">
+      {/* Skill map — dark card with lime/amber bars (matches the render) */}
+      <section className="card-dark">
+        <p className="mb-3 text-sm" style={{ color: "var(--on-charcoal-muted)" }}>
+          Skill map
+        </p>
+        <div className="space-y-3">
           {skills.map((s) => {
             const color =
               s.seen === 0
-                ? "rgba(0,0,0,0.15)"
-                : s.proficiency >= 70
-                ? "var(--good)"
-                : s.proficiency >= 45
+                ? "var(--charcoal-line)"
+                : s.proficiency >= 60
+                ? "var(--accent-bright)"
+                : s.proficiency >= 40
                 ? "var(--warn)"
                 : "var(--bad)";
+            const pctColor = s.seen === 0 ? "var(--on-charcoal-muted)" : color;
             return (
               <div key={s.key}>
-                <div className="mb-1 flex items-center justify-between text-sm">
-                  <span className="font-medium">{s.label}</span>
-                  <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--muted)" }}>
-                    {s.seen > 0 && (
-                      <span
-                        className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
-                        style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-                      >
-                        L{s.level}
-                      </span>
-                    )}
-                    {s.seen === 0 ? "not assessed" : `${s.proficiency}%`}
+                <div className="mb-1.5 flex items-center justify-between">
+                  <span className="text-sm font-medium" style={{ color: "var(--on-charcoal)" }}>
+                    {s.label}
+                  </span>
+                  <span className="text-sm font-semibold tabular-nums" style={{ color: pctColor }}>
+                    {s.seen === 0 ? "—" : `${s.proficiency}%`}
                   </span>
                 </div>
-                <div className="bar">
+                <div className="bar-dark">
                   <span style={{ width: `${s.seen === 0 ? 4 : s.proficiency}%`, background: color }} />
                 </div>
               </div>
@@ -192,6 +200,14 @@ export default function Profile() {
           })}
         </div>
       </section>
+
+      {/* Radar view kept below for the full-shape picture */}
+      {tested.length >= 3 && (
+        <section className="card">
+          <h3 className="mb-2 font-semibold">Shape</h3>
+          <SkillRadar skills={skills.map((s) => ({ key: s.key, label: s.label, proficiency: s.proficiency }))} />
+        </section>
+      )}
 
       <Plan />
 

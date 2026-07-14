@@ -152,3 +152,40 @@ do $$ begin
   create policy "own sessions" on sessions for all
     using (auth.uid() = user_id) with check (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
+
+-- ---------- 010: confidence-gated progression ----------
+alter table skill_profile add column if not exists sessions_at_level int not null default 0;
+alter table skill_profile add column if not exists history jsonb not null default '[]'::jsonb;
+
+-- ---------- 011: bookmarks (saved AI-news links) ----------
+create table if not exists bookmarks (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  title text not null,
+  url text not null,
+  source text,
+  created_at timestamptz not null default now(),
+  unique (user_id, url)
+);
+create index if not exists bookmarks_user_idx on bookmarks(user_id, created_at desc);
+alter table bookmarks enable row level security;
+do $$ begin
+  create policy "own bookmarks" on bookmarks for all
+    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+
+-- ---------- 012: feed summaries (papers / company articles) ----------
+create table if not exists feed_summaries (
+  id uuid primary key default gen_random_uuid(),
+  url text not null unique,
+  title text,
+  kind text not null,
+  summary text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists feed_summaries_url_idx on feed_summaries(url);
+alter table feed_summaries enable row level security;
+do $$ begin
+  create policy "read feed_summaries" on feed_summaries for select
+    using (auth.role() = 'authenticated');
+exception when duplicate_object then null; end $$;
