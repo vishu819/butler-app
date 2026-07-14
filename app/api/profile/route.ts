@@ -55,8 +55,38 @@ export async function GET() {
     d.setUTCDate(d.getUTCDate() - 1);
   }
 
+  // Extra tiles: total questions answered, brain-gym sessions, 7-day activity.
+  const totalQuestions = skills.reduce((s, k) => s + k.seen, 0);
+  const totalCorrect = skills.reduce((s, k) => s + k.correct, 0);
+  const accuracy = totalQuestions > 0 ? Math.round((totalCorrect / totalQuestions) * 100) : 0;
+
+  const { count: gymCount } = await supabase
+    .from("brain_gym_log")
+    .select("id", { count: "exact", head: true })
+    .eq("user_id", user.id);
+
+  // Last 7 days activity (quiz taken that day) for a mini bar strip.
+  const week: { date: string; active: boolean }[] = [];
+  const today0 = new Date();
+  for (let i = 6; i >= 0; i--) {
+    const dt = new Date(today0);
+    dt.setUTCDate(dt.getUTCDate() - i);
+    const key = dt.toISOString().slice(0, 10);
+    week.push({ date: key, active: dateSet.has(key) });
+  }
+
   return NextResponse.json({
     skills,
-    stats: { progress, rating, streak, assessed: tested.length, total: skills.length },
+    stats: {
+      progress,
+      rating,
+      streak,
+      assessed: tested.length,
+      total: skills.length,
+      totalQuestions,
+      accuracy,
+      gymSessions: gymCount || 0,
+      week,
+    },
   });
 }

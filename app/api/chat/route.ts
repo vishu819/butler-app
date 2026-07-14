@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { chatStream, type ChatMessage } from "@/lib/openrouter";
+import { modelFor } from "@/lib/models";
 import { SKILL_LABEL } from "@/lib/skills";
 
 export const runtime = "nodejs";
@@ -40,13 +41,14 @@ export async function POST(req: Request) {
   // Pull personalization context in parallel. Daily summaries get their own
   // dedicated slots (last 7) so a week of continuity is always present,
   // separate from the 25 ad-hoc memories.
-  const [profileRes, memoryRes, summaryRes, goalsRes, historyRes, skillRes] = await Promise.all([
+  const [profileRes, memoryRes, summaryRes, goalsRes, historyRes, skillRes, learnerRes] = await Promise.all([
     supabase.from("profiles").select("name, prefs").eq("id", user.id).single(),
     supabase.from("memory").select("kind, content").eq("user_id", user.id).neq("kind", "daily_summary").order("created_at", { ascending: false }).limit(25),
     supabase.from("memory").select("content, created_at").eq("user_id", user.id).eq("kind", "daily_summary").order("created_at", { ascending: false }).limit(7),
     supabase.from("goals").select("title, cadence").eq("user_id", user.id).eq("active", true),
     supabase.from("chat_messages").select("role, content").eq("user_id", user.id).order("created_at", { ascending: false }).limit(12),
     supabase.from("skill_profile").select("skill, level, proficiency, seen").eq("user_id", user.id),
+    supabase.from("learner_profile").select("narrative, strengths, gaps").eq("user_id", user.id).maybeSingle(),
   ]);
 
   const name = profileRes.data?.name || "there";
@@ -63,6 +65,10 @@ export async function POST(req: Request) {
     .sort((a, b) => a.proficiency - b.proficiency)
     .map((s) => `- ${SKILL_LABEL[s.skill] || s.skill}: ${s.proficiency}/100 (level ${s.level}/5)`)
     .join("\n");
+  const learner = learnerRes.data;
+  const learnerModel = learner?.narrative
+    ? `${learner.narrative}${learner.gaps?.length ? `\nCurrent gaps: ${learner.gaps.join(", ")}` : ""}`
+    : "";
 
   const system = `You are Butler, ${name}'s personal engineering mentor. You help them become a stronger software architect and improve individually.
 
@@ -70,6 +76,9 @@ Be warm, direct, and concise. Ask sharp follow-up questions. When relevant, conn
 
 What you know about ${name}:
 Preferences: ${JSON.stringify(prefs)}
+
+Your model of how they learn and think (from their sessions):
+${learnerModel || "(still building — encourage them to do daily sessions)"}
 
 Recent daily recaps (what they've been working on lately):
 ${summaries || "(none yet)"}
@@ -102,7 +111,7 @@ Only include that tag when it's genuinely worth persisting.`;
       let raw = "";
       let visible = ""; // what we've actually sent to the client
       try {
-        for await (const chunk of chatStream(messages)) {
+        for await (const chunk of chatStream(messages, { model: modelFor("coach") })) {
           raw += chunk;
           // Hold back text from a <remember tag onward so it's never shown.
           const cut = raw.search(/<remember/i);

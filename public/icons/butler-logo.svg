@@ -1,0 +1,32 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Butler logo">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#c9a86a"/>
+      <stop offset="100%" stop-color="#a97f45"/>
+    </linearGradient>
+    <linearGradient id="hat" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#2a2a2e"/>
+      <stop offset="100%" stop-color="#161618"/>
+    </linearGradient>
+  </defs>
+
+  <!-- rounded gold tile -->
+  <rect x="0" y="0" width="512" height="512" rx="116" fill="url(#bg)"/>
+
+  <!-- soft top glow -->
+  <ellipse cx="200" cy="120" rx="260" ry="150" fill="#ffffff" opacity="0.10"/>
+
+  <!-- top hat -->
+  <g>
+    <!-- brim -->
+    <ellipse cx="256" cy="356" rx="150" ry="30" fill="url(#hat)"/>
+    <!-- crown -->
+    <path d="M180 356 L180 214 Q180 190 204 190 L308 190 Q332 190 332 214 L332 356 Z" fill="url(#hat)"/>
+    <!-- band -->
+    <rect x="180" y="318" width="152" height="26" fill="#c9a86a"/>
+    <!-- band shine -->
+    <rect x="180" y="318" width="152" height="9" fill="#e6d4b0" opacity="0.8"/>
+    <!-- crown highlight -->
+    <rect x="196" y="206" width="12" height="100" rx="6" fill="#ffffff" opacity="0.10"/>
+  </g>
+</svg>

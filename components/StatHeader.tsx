@@ -1,6 +1,7 @@
 "use client";
 
 import { Star, Flame } from "lucide-react";
+import CountUp from "./ui/CountUp";
 
 export default function StatHeader({
   progress,
@@ -22,7 +23,7 @@ export default function StatHeader({
         <span className="section-label">Rating</span>
         <span className="flex items-center gap-1 text-2xl font-bold" style={{ color: "var(--accent)" }}>
           <Star size={18} className="fill-current" />
-          {rating.toFixed(1)}
+          <CountUp value={rating} decimals={1} />
           <span className="text-sm font-normal text-gray-400">/5</span>
         </span>
       </div>
@@ -31,7 +32,7 @@ export default function StatHeader({
         <span className="section-label">Streak</span>
         <span className="flex items-center gap-1 text-2xl font-bold">
           <Flame size={18} className="text-orange-500" />
-          {streak}
+          <CountUp value={streak} />
           <span className="text-sm font-normal text-gray-400">
             {streak === 1 ? "day" : "days"}
           </span>

@@ -3,6 +3,9 @@
 import { useEffect, useState } from "react";
 import StatHeader from "./StatHeader";
 import ResetPanel from "./ResetPanel";
+import CountUp from "./ui/CountUp";
+import Plan from "./Plan";
+import SkillRadar from "./viz/SkillRadar";
 
 type Skill = {
   key: string;
@@ -12,7 +15,18 @@ type Skill = {
   seen: number;
   correct: number;
 };
-type Stats = { progress: number; rating: number; streak: number; assessed: number; total: number };
+type WeekDay = { date: string; active: boolean };
+type Stats = {
+  progress: number;
+  rating: number;
+  streak: number;
+  assessed: number;
+  total: number;
+  totalQuestions: number;
+  accuracy: number;
+  gymSessions: number;
+  week: WeekDay[];
+};
 
 const LEVEL_NAME: Record<number, string> = {
   1: "Foundational",
@@ -53,6 +67,65 @@ export default function Profile() {
         <StatHeader progress={stats.progress} rating={stats.rating} streak={stats.streak} />
       )}
 
+      {/* Metric tiles */}
+      {stats && (
+        <div className="grid grid-cols-3 gap-2">
+          <div className="metric">
+            <div className="metric-value">
+              <CountUp value={stats.totalQuestions} />
+            </div>
+            <div className="metric-label">Questions</div>
+          </div>
+          <div className="metric">
+            <div className="metric-value" style={{ color: "var(--good)" }}>
+              <CountUp value={stats.accuracy} suffix="%" />
+            </div>
+            <div className="metric-label">Accuracy</div>
+          </div>
+          <div className="metric">
+            <div className="metric-value">
+              <CountUp value={stats.gymSessions} />
+            </div>
+            <div className="metric-label">Workouts</div>
+          </div>
+        </div>
+      )}
+
+      {/* Weekly activity strip */}
+      {stats && (
+        <section className="card">
+          <div className="mb-2 flex items-center justify-between">
+            <span className="section-label">This week</span>
+            <span className="text-xs" style={{ color: "var(--muted)" }}>
+              {stats.week.filter((d) => d.active).length}/7 active
+            </span>
+          </div>
+          <div className="flex items-end justify-between gap-1.5">
+            {stats.week.map((d) => {
+              const dow = new Date(d.date + "T00:00:00Z").toLocaleDateString(undefined, {
+                weekday: "narrow",
+              });
+              return (
+                <div key={d.date} className="flex flex-1 flex-col items-center gap-1">
+                  <div
+                    className="w-full rounded-lg transition-all"
+                    style={{
+                      height: d.active ? 32 : 10,
+                      background: d.active
+                        ? "linear-gradient(180deg,#c9a86a,#a97f45)"
+                        : "rgba(0,0,0,0.08)",
+                    }}
+                  />
+                  <span className="text-[10px]" style={{ color: "var(--muted)" }}>
+                    {dow}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
       <section className="card">
         <h2 className="mb-1 font-semibold">Your Architect Journey</h2>
         {tested.length === 0 ? (
@@ -84,33 +157,43 @@ export default function Profile() {
 
       <section className="card">
         <h3 className="mb-3 font-semibold">Skill map</h3>
-        <div className="space-y-3">
-          {skills.map((s) => (
-            <div key={s.key}>
-              <div className="mb-1 flex items-center justify-between text-sm">
-                <span>{s.label}</span>
-                <span className="text-xs text-gray-400">
-                  {s.seen === 0 ? "not assessed" : `Lv ${s.level} · ${LEVEL_NAME[s.level]}`}
-                </span>
+        <SkillRadar skills={skills.map((s) => ({ key: s.key, label: s.label, proficiency: s.proficiency }))} />
+        <div className="mt-2 space-y-3">
+          {skills.map((s) => {
+            const color =
+              s.seen === 0
+                ? "rgba(0,0,0,0.15)"
+                : s.proficiency >= 70
+                ? "var(--good)"
+                : s.proficiency >= 45
+                ? "var(--warn)"
+                : "var(--bad)";
+            return (
+              <div key={s.key}>
+                <div className="mb-1 flex items-center justify-between text-sm">
+                  <span className="font-medium">{s.label}</span>
+                  <span className="flex items-center gap-1.5 text-xs" style={{ color: "var(--muted)" }}>
+                    {s.seen > 0 && (
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[10px] font-semibold"
+                        style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+                      >
+                        L{s.level}
+                      </span>
+                    )}
+                    {s.seen === 0 ? "not assessed" : `${s.proficiency}%`}
+                  </span>
+                </div>
+                <div className="bar">
+                  <span style={{ width: `${s.seen === 0 ? 4 : s.proficiency}%`, background: color }} />
+                </div>
               </div>
-              <div className="h-2 overflow-hidden rounded-full bg-gray-100 dark:bg-gray-800">
-                <div
-                  className={`h-full rounded-full transition-[width] duration-700 ${
-                    s.seen === 0
-                      ? "bg-gray-300 dark:bg-gray-700"
-                      : s.proficiency >= 70
-                      ? "bg-green-500"
-                      : s.proficiency >= 45
-                      ? "bg-amber-500"
-                      : "bg-red-400"
-                  }`}
-                  style={{ width: `${s.seen === 0 ? 4 : s.proficiency}%` }}
-                />
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
+
+      <Plan />
 
       <ResetPanel onReset={load} />
     </div>

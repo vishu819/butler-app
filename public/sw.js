@@ -1,6 +1,8 @@
-// Minimal service worker: an app-shell cache so PI opens instantly when
-// installed to the home screen. Network-first for navigations.
-const CACHE = "pi-shell-v1";
+// App-shell + asset cache so Butler opens instantly when installed.
+// - Static _next assets: cache-first (they're content-hashed, immutable).
+// - Navigations/other GETs: network-first, fall back to cache offline.
+// - API calls: never cached (personalized, fresh).
+const CACHE = "butler-shell-v2";
 const SHELL = ["/", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
@@ -20,9 +22,28 @@ self.addEventListener("activate", (e) => {
 self.addEventListener("fetch", (e) => {
   const req = e.request;
   if (req.method !== "GET") return;
-  // Never cache API calls.
-  if (new URL(req.url).pathname.startsWith("/api/")) return;
+  const path = new URL(req.url).pathname;
 
+  // Never cache API calls — always fresh, personalized.
+  if (path.startsWith("/api/")) return;
+
+  // Content-hashed static assets: cache-first (immutable, fastest).
+  if (path.startsWith("/_next/static/")) {
+    e.respondWith(
+      caches.match(req).then(
+        (cached) =>
+          cached ||
+          fetch(req).then((res) => {
+            const copy = res.clone();
+            caches.open(CACHE).then((c) => c.put(req, copy));
+            return res;
+          })
+      )
+    );
+    return;
+  }
+
+  // Everything else: network-first, fall back to cache when offline.
   e.respondWith(
     fetch(req)
       .then((res) => {

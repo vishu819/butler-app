@@ -14,6 +14,15 @@
   --accent: #b8925a; /* warm gold */
   --accent-soft: #efe6d5;
   --ring: #c9a86a;
+  /* Semantic accents (disciplined — one meaning each) */
+  --good: #2f9e6f;
+  --good-soft: #e3f4ec;
+  --warn: #c98a2b;
+  --warn-soft: #f7edda;
+  --bad: #d9534f;
+  --bad-soft: #fbe8e7;
+  --info: #4a7fb5;
+  --info-soft: #e6eef6;
 }
 
 .dark {
@@ -50,11 +59,23 @@ body {
   text-rendering: optimizeLegibility;
 }
 
-/* Tighter tracking on big headings for a modern feel */
+/* Headings + stat numbers use the display face for crisper character. */
 h1,
 h2,
-h3 {
+h3,
+.font-display {
+  font-family: var(--font-display), var(--font-inter), system-ui, sans-serif;
   letter-spacing: -0.02em;
+  font-weight: 600;
+}
+h1 {
+  letter-spacing: -0.03em;
+}
+/* Numeric readouts (stats, timers, scores) look sharper in the display face. */
+.tabular-nums,
+.metric-value {
+  font-family: var(--font-display), var(--font-inter), system-ui, sans-serif;
+  font-feature-settings: "tnum" 1;
 }
 .dark html,
 .dark body {
@@ -135,6 +156,62 @@ a {
     @apply flex items-center justify-center rounded-2xl;
     background: var(--accent-soft);
     color: var(--accent);
+  }
+
+  /* Compact metric tile (Linear/Stripe style) */
+  .metric {
+    @apply rounded-2xl p-3;
+    background: var(--surface);
+    border: 1px solid rgba(0, 0, 0, 0.05);
+  }
+  .metric-value {
+    @apply text-xl font-bold leading-none tabular-nums;
+  }
+  .metric-label {
+    @apply mt-1 text-[11px] font-medium;
+    color: var(--muted);
+  }
+
+  /* Segmented control */
+  .segmented {
+    @apply flex gap-1 rounded-2xl p-1;
+    background: rgba(0, 0, 0, 0.045);
+  }
+  .dark .segmented {
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .segmented > button {
+    @apply flex-1 rounded-xl py-1.5 text-sm font-medium transition-all;
+    color: var(--muted);
+  }
+  .segmented > button[data-active="true"] {
+    background: var(--surface);
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  }
+
+  /* Thin progress bar */
+  .bar {
+    @apply h-1.5 overflow-hidden rounded-full;
+    background: rgba(0, 0, 0, 0.06);
+  }
+  .dark .bar {
+    background: rgba(255, 255, 255, 0.08);
+  }
+  .bar > span {
+    @apply block h-full rounded-full;
+    transition: width 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  /* Card hover-lift (desktop; harmless on touch) */
+  .lift {
+    transition: transform 0.18s ease, box-shadow 0.18s ease;
+  }
+  @media (hover: hover) {
+    .lift:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 12px 30px -12px rgba(31, 36, 48, 0.22);
+    }
   }
 }
 

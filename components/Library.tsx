@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Calendar, Sparkles } from "lucide-react";
+import { cachedGet } from "@/lib/fetch-cache";
 
 type Day = {
   id: string;
@@ -17,8 +18,7 @@ export default function Library() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("/api/learning")
-      .then((r) => r.json())
+    cachedGet("/api/learning")
       .then((j) => setDays(j.days || []))
       .finally(() => setLoading(false));
   }, []);

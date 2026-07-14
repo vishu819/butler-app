@@ -84,6 +84,7 @@ export async function chat(
     json?: boolean;
     maxTokens?: number;
     timeoutMs?: number;
+    online?: boolean; // append :online for OpenRouter's built-in web search
   } = {}
 ): Promise<string> {
   const key = process.env.OPENROUTER_API_KEY;
@@ -91,6 +92,9 @@ export async function chat(
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), opts.timeoutMs ?? 45000);
+
+  const baseModel = opts.model || process.env.OPENROUTER_MODEL || "anthropic/claude-3.5-sonnet";
+  const model = opts.online ? `${baseModel}:online` : baseModel;
 
   let res: Response;
   try {
@@ -103,7 +107,7 @@ export async function chat(
         "X-Title": "PI Companion",
       },
       body: JSON.stringify({
-        model: opts.model || process.env.OPENROUTER_MODEL || "anthropic/claude-3.5-sonnet",
+        model,
         messages,
         temperature: opts.temperature ?? 0.7,
         ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),

@@ -91,3 +91,64 @@ do $$ begin
   create policy "own concept_diagrams" on concept_diagrams for all
     using (auth.uid() = user_id) with check (auth.uid() = user_id);
 exception when duplicate_object then null; end $$;
+
+-- ---------- 007: daily learning digest ----------
+create table if not exists daily_learning (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  learn_date date not null,
+  summary text not null,
+  concepts text[] default '{}',
+  score int, total int,
+  created_at timestamptz not null default now(),
+  unique (user_id, learn_date)
+);
+create index if not exists daily_learning_user_idx on daily_learning(user_id, learn_date desc);
+alter table daily_learning enable row level security;
+do $$ begin
+  create policy "own daily_learning" on daily_learning for all
+    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+
+-- ---------- 008: learner profile + curriculum ----------
+create table if not exists learner_profile (
+  user_id uuid primary key references auth.users(id) on delete cascade,
+  narrative text, strengths text[] default '{}', gaps text[] default '{}',
+  misconceptions jsonb default '[]'::jsonb, updated_at timestamptz not null default now()
+);
+create table if not exists curriculum (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  module text not null, topic text not null, skill text, rationale text,
+  position int not null default 0, status text not null default 'planned',
+  mastery int not null default 0,
+  created_at timestamptz not null default now(), updated_at timestamptz not null default now()
+);
+create index if not exists curriculum_user_idx on curriculum(user_id, position);
+alter table learner_profile enable row level security;
+alter table curriculum enable row level security;
+do $$ begin
+  create policy "own learner_profile" on learner_profile for all
+    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+do $$ begin
+  create policy "own curriculum" on curriculum for all
+    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;
+
+-- ---------- 009: session engine + slow-ramp ----------
+alter table skill_profile add column if not exists level_streak int not null default 0;
+create table if not exists sessions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  session_date date not null, focus_skills text[] default '{}',
+  questions jsonb not null default '[]'::jsonb, responses jsonb not null default '[]'::jsonb,
+  status text not null default 'active', created_at timestamptz not null default now(),
+  unique (user_id, session_date)
+);
+create index if not exists sessions_user_idx on sessions(user_id, session_date desc);
+alter table sessions enable row level security;
+do $$ begin
+  create policy "own sessions" on sessions for all
+    using (auth.uid() = user_id) with check (auth.uid() = user_id);
+exception when duplicate_object then null; end $$;

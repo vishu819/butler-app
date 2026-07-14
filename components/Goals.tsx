@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { Check, Plus, Target, X } from "lucide-react";
+import { toast } from "./ui/Toast";
 
 type Goal = { id: string; title: string; cadence: string; done_today: boolean };
 
@@ -51,6 +52,7 @@ export default function Goals() {
 
   async function remove(id: string) {
     setGoals((gs) => gs.filter((x) => x.id !== id));
+    toast("Goal removed");
     await fetch("/api/goals", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Brain, Timer } from "lucide-react";
 
 type Exercise = {
   category: string;
@@ -118,17 +119,21 @@ export default function BrainGym() {
   return (
     <div className="space-y-4 animate-fade-up">
       <section className="card">
-        <div className="mb-2 flex items-center gap-2">
-          <span className="text-lg">🧠</span>
-          <h2 className="font-semibold">Brain Gym</h2>
-          <span className="ml-auto text-xs text-gray-400">
-            {trainedCats}/7 areas · {totalTrained} sessions
+        <div className="mb-3 flex items-center gap-2.5">
+          <span className="icon-tile h-9 w-9">
+            <Brain size={18} />
           </span>
+          <div className="min-w-0 flex-1">
+            <h2 className="font-semibold leading-tight">Brain Gym</h2>
+            <p className="text-xs" style={{ color: "var(--muted)" }}>
+              {trainedCats}/7 areas · {totalTrained} sessions
+            </p>
+          </div>
         </div>
 
         {!ex ? (
-          <div className="py-3 text-center">
-            <p className="mb-3 text-sm text-gray-500">
+          <div className="py-2 text-center">
+            <p className="mb-3 text-sm" style={{ color: "var(--muted)" }}>
               Timed mental workouts that rotate through every cognitive area.
             </p>
             <button onClick={() => start()} disabled={loading} className="btn-primary">
@@ -139,36 +144,34 @@ export default function BrainGym() {
         ) : (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="rounded-full bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-700 dark:bg-brand-700/20 dark:text-brand-300">
-                {CAT_LABEL[ex.category] || ex.category}
-              </span>
+              <span className="chip">{CAT_LABEL[ex.category] || ex.category}</span>
               <span
-                className={`font-mono text-lg font-bold ${
-                  running && remaining <= 10 ? "text-red-500" : "text-gray-700 dark:text-gray-200"
-                }`}
+                className="flex items-center gap-1 text-lg font-bold tabular-nums"
+                style={{ color: running && remaining <= 10 ? "var(--bad)" : "var(--ink)" }}
               >
-                ⏱ {mmss(remaining)}
+                <Timer size={16} />
+                {mmss(remaining)}
               </span>
             </div>
 
-            <p className="whitespace-pre-wrap text-sm font-medium">{ex.prompt}</p>
+            <p className="whitespace-pre-wrap text-[15px] font-medium leading-snug">{ex.prompt}</p>
 
             {!revealed ? (
               <div className="flex gap-2">
                 <button onClick={() => finish(true)} className="btn-primary flex-1">
-                  I solved it ✓
+                  I solved it
                 </button>
                 <button onClick={() => finish(false)} className="btn-ghost flex-1">
                   Reveal answer
                 </button>
               </div>
             ) : (
-              <div className="rounded-xl bg-gray-50 p-3 text-sm dark:bg-gray-800">
-                <p>
+              <div className="rounded-xl p-3 text-sm" style={{ background: "var(--accent-soft)" }}>
+                <p style={{ color: "var(--ink)" }}>
                   <span className="font-semibold">Answer: </span>
                   {ex.answer}
                 </p>
-                {ex.why && <p className="mt-1 text-gray-500">{ex.why}</p>}
+                {ex.why && <p className="mt-1" style={{ color: "var(--muted)" }}>{ex.why}</p>}
                 <button onClick={() => start()} className="btn-primary mt-3">
                   Next workout →
                 </button>
@@ -182,23 +185,29 @@ export default function BrainGym() {
       <section className="card">
         <p className="section-label mb-2">Coverage — train every area</p>
         <div className="grid grid-cols-2 gap-2">
-          {Object.keys(CAT_LABEL).map((k) => (
+          {Object.keys(CAT_LABEL).map((k) => {
+            const done = (counts[k] || 0) > 0;
+            return (
             <button
               key={k}
               onClick={() => start(k)}
               disabled={loading}
-              className="card-tap flex items-center justify-between rounded-lg border border-gray-200 px-3 py-2 text-left text-sm dark:border-gray-800"
+              className="card-tap flex items-center justify-between rounded-xl border px-3 py-2.5 text-left text-sm"
+              style={{
+                borderColor: done ? "var(--accent)" : "rgba(0,0,0,0.08)",
+                background: done ? "var(--accent-soft)" : "transparent",
+              }}
             >
-              <span>{CAT_LABEL[k]}</span>
+              <span className="min-w-0 truncate" style={{ color: "var(--ink)" }}>{CAT_LABEL[k]}</span>
               <span
-                className={`text-xs ${
-                  (counts[k] || 0) > 0 ? "text-brand-600 dark:text-brand-400" : "text-gray-400"
-                }`}
+                className="shrink-0 text-xs font-semibold"
+                style={{ color: done ? "var(--accent)" : "var(--muted)" }}
               >
-                {(counts[k] || 0) > 0 ? `${counts[k]}×` : "new"}
+                {done ? `${counts[k]}×` : "new"}
               </span>
             </button>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>

@@ -1,15 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Home, Dumbbell, BarChart3, BookOpen, MessageCircle, LogOut } from "lucide-react";
+import { Home, Dumbbell, BarChart3, BookOpen, MessageCircle } from "lucide-react";
 import Goals from "./Goals";
 import DailyCards from "./DailyCards";
+import Session from "./Session";
 import Coach, { GREETING, type Msg } from "./Coach";
 import Profile from "./Profile";
 import BrainGym from "./BrainGym";
 import Library from "./Library";
 import StatHeader from "./StatHeader";
-import ChangePassword from "./ChangePassword";
+import AccountPanel from "./AccountPanel";
+import { cachedGet, prefetch } from "@/lib/fetch-cache";
 
 type Tab = "home" | "practice" | "progress" | "library" | "coach";
 type Stats = { progress: number; rating: number; streak: number };
@@ -22,17 +24,29 @@ const TABS: { key: Tab; label: string; Icon: typeof Home }[] = [
   { key: "coach", label: "Coach", Icon: MessageCircle },
 ];
 
-export default function Dashboard({ name }: { name: string }) {
+export default function Dashboard({ name, email }: { name: string; email: string }) {
   const [tab, setTab] = useState<Tab>("home");
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
   const [stats, setStats] = useState<Stats | null>(null);
   useEffect(() => {
-    fetch("/api/profile")
+    // First-run setup: ensure a baseline profile + build the plan if missing.
+    fetch("/api/init", { method: "POST" })
       .then((r) => r.json())
+      .then((j) => {
+        if (j.needsPlan) fetch("/api/plan", { method: "POST" }).catch(() => {});
+      })
+      .catch(() => {});
+
+    cachedGet("/api/profile")
       .then((j) => j.stats && setStats(j.stats))
       .catch(() => {});
+    // Prefetch the other tabs' data so switching is instant.
+    prefetch("/api/session");
+    prefetch("/api/plan");
+    prefetch("/api/learning");
+    prefetch("/api/goals");
   }, []);
 
   const [messages, setMessages] = useState<Msg[]>([GREETING]);
@@ -50,26 +64,33 @@ export default function Dashboard({ name }: { name: string }) {
   return (
     <main className="mx-auto max-w-2xl px-4 pb-28 pt-6">
       <header className="mb-5 flex items-center justify-between">
-        <div>
-          <p className="text-sm" style={{ color: "var(--muted)" }}>
-            {greeting},
-          </p>
-          <h1 className="flex items-center gap-1.5 text-2xl font-bold tracking-tight">
-            {name}
-            <span className="text-xl">🎩</span>
-          </h1>
+        <div className="flex items-center gap-3">
+          {/* Brand mark */}
+          <span
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl text-xl"
+            style={{
+              background: "linear-gradient(135deg,#c9a86a,#a97f45)",
+              boxShadow: "0 6px 16px -8px rgba(169,127,69,.6)",
+            }}
+          >
+            🎩
+          </span>
+          <div>
+            <p className="text-xs" style={{ color: "var(--muted)" }}>
+              {greeting}
+            </p>
+            <h1 className="text-xl font-bold leading-tight tracking-tight">{name}</h1>
+          </div>
         </div>
-        <div className="flex items-center gap-1">
-          <ChangePassword />
-          <form action="/auth/signout" method="post">
-            <button
-              aria-label="Sign out"
-              className="rounded-xl p-2 text-gray-400 transition-colors hover:bg-black/5 dark:hover:bg-white/5"
-            >
-              <LogOut size={18} />
-            </button>
-          </form>
-        </div>
+        {/* Account → jumps to Progress tab where account/actions live */}
+        <button
+          onClick={() => setTab("progress")}
+          aria-label="Account"
+          className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold transition-transform active:scale-90"
+          style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
+        >
+          {name.trim().charAt(0).toUpperCase() || "?"}
+        </button>
       </header>
 
       {/* content — keyed so it re-animates on tab change */}
@@ -79,12 +100,18 @@ export default function Dashboard({ name }: { name: string }) {
             {stats && (
               <StatHeader progress={stats.progress} rating={stats.rating} streak={stats.streak} />
             )}
+            <Session />
             <Goals />
             <DailyCards />
           </div>
         )}
         {tab === "practice" && <BrainGym />}
-        {tab === "progress" && <Profile />}
+        {tab === "progress" && (
+        <div className="space-y-4">
+          <Profile />
+          <AccountPanel name={name} email={email} />
+        </div>
+      )}
         {tab === "library" && <Library />}
       </div>
 
