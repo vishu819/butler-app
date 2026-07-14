@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { invalidateAll } from "@/lib/fetch-cache";
 
 const TARGETS: { key: string; label: string; desc: string }[] = [
   { key: "skills", label: "Skill progress", desc: "Skill levels, proficiency + quiz history" },
@@ -33,6 +34,7 @@ export default function ResetPanel({ onReset }: { onReset: () => void }) {
         setMsg("✓ Reset done.");
         setPending(null);
         setConfirmText("");
+        invalidateAll(); // clear any cached reads so nothing stale re-appears
         onReset();
       } else setMsg(j.error || "Reset failed");
     } catch {

@@ -17,22 +17,36 @@ export type SessionQuestion = {
 
 type SkillRow = { skill: string; level?: number; proficiency?: number; seen?: number };
 
-// Choose the ~2 weakest / least-seen sectors to focus on today.
-export function pickFocusSkills(rows: SkillRow[], n = 2): { key: string; level: number; label: string }[] {
+// Choose a BROAD spread of sectors to cover, weighted toward weak areas, while
+// deprioritizing skills covered in recent sessions so every competency cycles
+// over roughly a week. `recentlyCovered` = skill keys from the last few sessions.
+export function pickFocusSkills(
+  rows: SkillRow[],
+  n = 4,
+  recentlyCovered: string[] = []
+): { key: string; level: number; label: string }[] {
+  // Count how recently each skill was covered (0 = not recent).
+  const recencyCount = new Map<string, number>();
+  recentlyCovered.forEach((k) => recencyCount.set(k, (recencyCount.get(k) || 0) + 1));
+
   const state = SKILLS.map((s) => {
     const r = rows.find((x) => x.skill === s.key);
-    return { key: s.key, label: s.label, level: r?.level ?? 1, proficiency: r?.proficiency ?? 0, seen: r?.seen ?? 0 };
+    const proficiency = r?.proficiency ?? 0;
+    const seen = r?.seen ?? 0;
+    const recent = recencyCount.get(s.key) || 0;
+    // Priority score: weaker = higher; never-seen = highest; recently-covered = penalized.
+    // (lower score sorts first)
+    const weakness = seen === 0 ? -20 : proficiency; // untested first
+    const score = weakness + recent * 30; // push recently-covered to the back
+    return { key: s.key, label: s.label, level: r?.level ?? 1, proficiency, seen, score };
   });
-  const ranked = [...state].sort((a, b) => {
-    const av = a.seen === 0 ? -1 : a.proficiency;
-    const bv = b.seen === 0 ? -1 : b.proficiency;
-    return av - bv;
-  });
+
+  const ranked = [...state].sort((a, b) => a.score - b.score);
   return ranked.slice(0, n).map((s) => ({ key: s.key, level: s.level, label: s.label }));
 }
 
 const SYS =
-  "You are Butler, a master software-architecture mentor writing a focused daily learning session. You write SPECIFIC, practical questions that target the exact things engineers commonly FAIL at (real tradeoffs, subtle failure modes, database-design decisions people get wrong, distributed-systems consistency traps). Difficulty must match the stated level — level 1 is approachable for a mid-level engineer, level 5 is staff/architect depth. Each question has a multiple-choice part AND a follow-up open question that probes deeper understanding of the same idea. Ground questions in how real systems behave. Return JSON only.";
+  "You are Butler, a staff-level software-architecture mentor writing a daily learning session. Write SPECIFIC, deep questions rooted in REAL large-scale software problems — the hard tradeoffs and failure modes that senior engineers and architects actually face and commonly get WRONG: consistency vs availability under partition, hot-partition and sharding pitfalls, cache stampede/invalidation, backpressure and queue overload, idempotency and exactly-once myths, N+1 and index design, thundering herd, cascading failure and bulkheads, schema evolution, tail latency. Prefer concrete scenarios with real numbers and named failure modes over textbook definitions. Difficulty matches the stated level (1 = approachable for a mid-level engineer, 5 = staff/architect depth). Each question has a multiple-choice part AND an open follow-up that forces the learner to explain the underlying tradeoff/reasoning. Return JSON only.";
 
 // Web-grounding step: gather real-world failure cases / tradeoffs for the focus
 // skills using OpenRouter's :online plugin. Returns plain text. Best-effort — on
@@ -92,7 +106,7 @@ Return JSON:
 Exactly 4 options each, vary the correct index. Make scenarios concrete (real numbers, real failure modes).`,
       },
     ],
-    { model: modelFor("generate"), json: true, temperature: 0.8, maxTokens: 4000, timeoutMs: 55000 }
+    { model: modelFor("generate"), json: true, temperature: 0.8, maxTokens: 6000, timeoutMs: 58000 }
   );
 
   return parseSession(raw);

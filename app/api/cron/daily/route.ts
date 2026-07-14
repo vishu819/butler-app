@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { chat } from "@/lib/openrouter";
-import { buildSkillState, generateQuiz, QUIZ_TITLE } from "@/lib/quiz-gen";
 import { BRAIN_CATEGORIES, nextCategory } from "@/lib/brain-gym";
 
 export const runtime = "nodejs";
@@ -28,44 +27,7 @@ export async function GET(req: Request) {
   const results: Record<string, string> = {};
   const rows: { content_date: string; type: string; payload: unknown }[] = [];
 
-  // ---- Daily quiz: 10 adaptive, skill-targeted MCQs (same engine as on-demand) ----
-  if (!have.has("eng_q")) {
-    try {
-      // Single-user app: load the (one) user's skill profile to target weaknesses.
-      const { data: prof } = await admin.from("profiles").select("id").limit(1).maybeSingle();
-      const { data: profileRows } = prof
-        ? await admin
-            .from("skill_profile")
-            .select("skill, level, proficiency, seen")
-            .eq("user_id", prof.id)
-        : { data: [] as any[] };
-      const skillState = buildSkillState(profileRows || []);
-
-      // Avoid repeating recent questions.
-      const { data: recentQuizzes } = await admin
-        .from("daily_content")
-        .select("payload")
-        .eq("type", "eng_q")
-        .order("content_date", { ascending: false })
-        .limit(7);
-      const askedQuestions = (recentQuizzes || [])
-        .flatMap((r) => (r.payload as any)?.questions || [])
-        .map((q: any) => q?.question)
-        .filter(Boolean)
-        .slice(0, 40);
-
-      const questions = await generateQuiz(skillState, askedQuestions);
-      if (questions.length === 0) throw new Error("no valid questions returned");
-      rows.push({
-        content_date: today,
-        type: "eng_q",
-        payload: { title: QUIZ_TITLE, questions },
-      });
-      results.eng_q = `ok (${questions.length} questions)`;
-    } catch (e: any) {
-      results.eng_q = `error: ${e.message}`;
-    }
-  }
+  // (Legacy daily eng_q quiz retired — the on-demand Session is the learning loop now.)
 
   // ---- Brain gym (rotating category so every aspect gets trained) ----
   if (!have.has("brain_gym")) {

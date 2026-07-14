@@ -4,6 +4,7 @@ import { useState } from "react";
 import { User, RefreshCw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
 import { toast } from "./ui/Toast";
+import { invalidateAll } from "@/lib/fetch-cache";
 
 // Account info + actions, including "Start fresh" (full reset + re-onboarding).
 export default function AccountPanel({ name, email }: { name: string; email: string }) {
@@ -45,11 +46,12 @@ export default function AccountPanel({ name, email }: { name: string; email: str
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ answers: { experience, role, goal, strong, weak } }),
       });
-      // 3) build a fresh curriculum
+      // 3) build a fresh curriculum (this is the slow step, ~15-20s)
       await fetch("/api/plan", { method: "POST" });
-      toast("Fresh start ready 🎩", "good");
-      // reload so every tab reflects the clean slate
-      setTimeout(() => window.location.reload(), 600);
+      // 4) clear all client caches so nothing stale is re-served
+      invalidateAll();
+      // Reload only AFTER everything above has completed — no timer race.
+      window.location.assign("/");
     } catch {
       toast("Couldn't start fresh — try again", "bad");
       setStage("idle");
@@ -143,9 +145,10 @@ export default function AccountPanel({ name, email }: { name: string; email: str
         )}
 
         {stage === "working" && (
-          <p className="mt-3 text-sm" style={{ color: "var(--accent)" }}>
-            Wiping and rebuilding your profile…
-          </p>
+          <div className="mt-3 flex items-center gap-2 text-sm" style={{ color: "var(--accent)" }}>
+            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" style={{ borderColor: "var(--accent-soft)", borderTopColor: "var(--accent)" }} />
+            Wiping and rebuilding your profile… this takes ~20 seconds.
+          </div>
         )}
       </section>
     </div>

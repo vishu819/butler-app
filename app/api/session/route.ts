@@ -5,7 +5,7 @@ import { pickFocusSkills, generateSession, gatherWebContext } from "@/lib/sessio
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const PER_SKILL = 2; // ~2 questions each × 2 sectors ≈ 4-5 per day
+const PER_SKILL = 2; // 2 each × 3 focus sectors + 2 new concept ≈ 8 per day
 
 // GET -> today's session (without the correct answers / explanations pre-reveal).
 export async function GET() {
@@ -60,8 +60,19 @@ export async function POST() {
     .from("skill_profile")
     .select("skill, level, proficiency, seen")
     .eq("user_id", user.id);
-  // Reinforce the single weakest area (the "new concept" provides breadth).
-  const focus = pickFocusSkills(skillRows || [], 1);
+
+  // Broad coverage: what did recent sessions already cover? Deprioritize those
+  // so all competencies cycle over ~a week, while still weighting toward weak areas.
+  const { data: recentSessions } = await supabase
+    .from("sessions")
+    .select("focus_skills")
+    .eq("user_id", user.id)
+    .order("session_date", { ascending: false })
+    .limit(3);
+  const recentlyCovered = (recentSessions || []).flatMap((s) => s.focus_skills || []);
+
+  // ~3 focus skills × 2 questions + 2 on a new concept ≈ 8 questions.
+  const focus = pickFocusSkills(skillRows || [], 3, recentlyCovered);
 
   // Pick the next NEW concept: an unmastered curriculum topic not yet introduced.
   const { data: topics } = await supabase

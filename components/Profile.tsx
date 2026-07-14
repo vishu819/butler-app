@@ -6,6 +6,7 @@ import ResetPanel from "./ResetPanel";
 import CountUp from "./ui/CountUp";
 import Plan from "./Plan";
 import SkillRadar from "./viz/SkillRadar";
+import { cachedGet, invalidate } from "@/lib/fetch-cache";
 
 type Skill = {
   key: string;
@@ -41,10 +42,9 @@ export default function Profile() {
   const [stats, setStats] = useState<Stats | null>(null);
   const [loading, setLoading] = useState(true);
 
-  function load() {
+  function load(force = false) {
     setLoading(true);
-    fetch("/api/profile")
-      .then((r) => r.json())
+    cachedGet("/api/profile", { force })
       .then((j) => {
         setSkills(j.skills || []);
         setStats(j.stats || null);
@@ -195,7 +195,7 @@ export default function Profile() {
 
       <Plan />
 
-      <ResetPanel onReset={load} />
+      <ResetPanel onReset={() => load(true)} />
     </div>
   );
 }

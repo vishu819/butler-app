@@ -46,3 +46,8 @@ export function prefetch(url: string) {
 export function invalidate(url: string) {
   cache.delete(url);
 }
+
+// Clear the entire cache — call after a big mutation (start fresh, session done).
+export function invalidateAll() {
+  cache.clear();
+}

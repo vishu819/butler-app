@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { ChevronRight, HelpCircle, Sparkles } from "lucide-react";
 import { toast } from "./ui/Toast";
+import { invalidate } from "@/lib/fetch-cache";
 import SessionResults from "./viz/SessionResults";
+import { LearnThis, VisualizeThis } from "./viz/LearnVisualize";
 
 type Q = {
   skill: string;
@@ -75,6 +77,9 @@ export default function Session() {
       const res = await fetch("/api/session/process", { method: "POST" });
       const j = await res.json();
       if (j.status === "processed") {
+        // Progress/plan changed — clear their caches so the tabs show fresh data.
+        invalidate("/api/profile");
+        invalidate("/api/plan");
         setProcessed({
           narrative: j.narrative,
           leveled: j.leveled,
@@ -378,6 +383,11 @@ export default function Session() {
                 {reveal.explanation}
               </p>
             )}
+            {/* Go deeper on this concept */}
+            <div className="flex flex-wrap gap-2">
+              <LearnThis concept={q.concept} question={q.question} />
+              <VisualizeThis concept={q.concept} skill={q.skill} />
+            </div>
           </div>
         )}
       </div>

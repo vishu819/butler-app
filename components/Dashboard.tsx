@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { Home, Dumbbell, BarChart3, BookOpen, MessageCircle } from "lucide-react";
 import Goals from "./Goals";
-import DailyCards from "./DailyCards";
 import Session from "./Session";
 import Coach, { GREETING, type Msg } from "./Coach";
 import Profile from "./Profile";
@@ -102,7 +101,6 @@ export default function Dashboard({ name, email }: { name: string; email: string
             )}
             <Session />
             <Goals />
-            <DailyCards />
           </div>
         )}
         {tab === "practice" && <BrainGym />}
