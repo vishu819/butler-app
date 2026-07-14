@@ -1,8 +1,11 @@
 // App-shell + asset cache so Butler opens instantly when installed.
-// - Static _next assets: cache-first (they're content-hashed, immutable).
-// - Navigations/other GETs: network-first, fall back to cache offline.
+// - Everything: network-first, fall back to cache when offline.
 // - API calls: never cached (personalized, fresh).
-const CACHE = "butler-shell-v2";
+// NOTE: previously used cache-first for /_next/static/, but in dev Next serves
+// chunks at STABLE (non-hashed) paths, so cache-first froze old JS forever
+// (that's what broke the session grading UI). Network-first is safe for both
+// dev and prod (prod chunks are content-hashed, so the cache stays warm).
+const CACHE = "butler-shell-v3";
 const SHELL = ["/", "/manifest.webmanifest"];
 
 self.addEventListener("install", (e) => {
@@ -27,23 +30,7 @@ self.addEventListener("fetch", (e) => {
   // Never cache API calls — always fresh, personalized.
   if (path.startsWith("/api/")) return;
 
-  // Content-hashed static assets: cache-first (immutable, fastest).
-  if (path.startsWith("/_next/static/")) {
-    e.respondWith(
-      caches.match(req).then(
-        (cached) =>
-          cached ||
-          fetch(req).then((res) => {
-            const copy = res.clone();
-            caches.open(CACHE).then((c) => c.put(req, copy));
-            return res;
-          })
-      )
-    );
-    return;
-  }
-
-  // Everything else: network-first, fall back to cache when offline.
+  // Everything (incl. JS chunks): network-first, fall back to cache offline.
   e.respondWith(
     fetch(req)
       .then((res) => {

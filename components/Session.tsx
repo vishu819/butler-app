@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowRight, ChevronRight, HelpCircle, Sparkles } from "lucide-react";
+import { ArrowRight, ChevronRight, HelpCircle, RotateCw, Sparkles } from "lucide-react";
 import { toast } from "./ui/Toast";
 import { invalidate } from "@/lib/fetch-cache";
 import SessionResults from "./viz/SessionResults";
@@ -26,6 +26,7 @@ type Resp = {
   mcq_correct: boolean;
   followup_score: number;
   feedback: string;
+  graded?: boolean;
 };
 
 export default function Session() {
@@ -52,7 +53,8 @@ export default function Session() {
   const [phase, setPhase] = useState<"mcq" | "followup" | "reviewed">("mcq");
   const [busy, setBusy] = useState(false);
   const [reveal, setReveal] = useState<{ correct: number; explanation: string } | null>(null);
-  const [judge, setJudge] = useState<{ score: number; feedback: string } | null>(null);
+  const [judge, setJudge] = useState<{ score: number; feedback: string; graded?: boolean } | null>(null);
+  const [regrading, setRegrading] = useState(false);
   // Follow-up MCQs: the revealed answers + which option the user picked for each.
   const [fuMcqs, setFuMcqs] = useState<FUMCQ[]>([]);
   const [fuPicks, setFuPicks] = useState<Record<number, number>>({});
@@ -114,7 +116,7 @@ export default function Session() {
     if (r) {
       setChosen(r.chosen);
       setFollowup(r.followup_text);
-      setJudge({ score: r.followup_score, feedback: r.feedback });
+      setJudge({ score: r.followup_score, feedback: r.feedback, graded: r.graded !== false });
       setReveal(questions[idx]?.explanation != null ? { correct: questions[idx].correct!, explanation: questions[idx].explanation! } : null);
       // Restore revealed follow-up MCQs (present once the question is answered).
       setFuMcqs(questions[idx]?.followup_mcqs || []);
@@ -160,7 +162,7 @@ export default function Session() {
       const j = await res.json();
       if (j.reveal) {
         setReveal(j.reveal);
-        setJudge({ score: j.response.followup_score, feedback: j.response.feedback });
+        setJudge({ score: j.response.followup_score, feedback: j.response.feedback, graded: j.response.graded !== false });
         setFuMcqs(j.reveal.followup_mcqs || []);
         setFuPicks({});
         setResponses((rs) => [...rs.filter((r) => r.qi !== idx), j.response]);
@@ -175,6 +177,34 @@ export default function Session() {
       setErr("Network error");
     } finally {
       setBusy(false);
+    }
+  }
+
+  // Re-run the LLM grade for the current question when it fell back last time.
+  async function regrade() {
+    if (regrading) return;
+    setRegrading(true);
+    try {
+      const res = await fetch("/api/session/answer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ qi: idx, chosen, followup }),
+      });
+      const j = await res.json();
+      if (j.response) {
+        setJudge({ score: j.response.followup_score, feedback: j.response.feedback, graded: j.response.graded !== false });
+        setResponses((rs) => [...rs.filter((r) => r.qi !== idx), j.response]);
+        if (j.response.graded !== false) toast("Graded ✓", "good");
+        else toast("Still couldn't grade — try again in a moment", "info");
+        // Progression depends on the grade; refresh it if the session is done.
+        if (status === "complete") runProcess();
+      } else {
+        toast("Couldn't reach the grader", "bad");
+      }
+    } catch {
+      toast("Network error", "bad");
+    } finally {
+      setRegrading(false);
     }
   }
 
@@ -433,17 +463,35 @@ export default function Session() {
         {phase === "reviewed" && (
           <div className="mt-3 space-y-2">
             {judge && (
-              <div className="rounded-xl p-3 text-sm" style={{ background: "var(--accent-soft)" }}>
-                <div className="mb-1 flex items-center gap-2">
-                  <span className="font-bold" style={{ color: "var(--accent)" }}>
-                    {judge.score}/100
-                  </span>
-                  <span className="text-xs" style={{ color: "var(--muted)" }}>
-                    on your explanation
-                  </span>
+              judge.graded === false ? (
+                // Grading fell back — offer a retry instead of a misleading score.
+                <div className="rounded-xl p-3 text-sm" style={{ background: "var(--warn-soft)" }}>
+                  <p className="mb-2" style={{ color: "var(--ink)" }}>
+                    Answer saved — automatic grading was unavailable this time.
+                  </p>
+                  <button
+                    onClick={regrade}
+                    disabled={regrading}
+                    className="flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-semibold transition-all active:scale-95 disabled:opacity-60"
+                    style={{ background: "var(--charcoal)", color: "var(--accent-bright)" }}
+                  >
+                    <RotateCw size={13} className={regrading ? "animate-spin" : ""} />
+                    {regrading ? "Grading…" : "Retry grading"}
+                  </button>
                 </div>
-                {judge.feedback && <p style={{ color: "var(--ink)" }}>{judge.feedback}</p>}
-              </div>
+              ) : (
+                <div className="rounded-xl p-3 text-sm" style={{ background: "var(--accent-soft)" }}>
+                  <div className="mb-1 flex items-center gap-2">
+                    <span className="font-bold" style={{ color: "var(--accent)" }}>
+                      {judge.score}/100
+                    </span>
+                    <span className="text-xs" style={{ color: "var(--muted)" }}>
+                      on your explanation
+                    </span>
+                  </div>
+                  {judge.feedback && <p style={{ color: "var(--ink)" }}>{judge.feedback}</p>}
+                </div>
+              )
             )}
             {reveal && (
               <p className="rounded-xl bg-gray-50 p-3 text-xs leading-relaxed text-gray-600 dark:bg-gray-800 dark:text-gray-300">

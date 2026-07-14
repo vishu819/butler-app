@@ -61,6 +61,7 @@ export async function POST(req: Request) {
 
   // LLM judges the typed follow-up answer.
   let judge = { score: 0, feedback: "" };
+  let graded = true; // false when the LLM grade failed and we fell back
   if (followup && typeof followup === "string" && followup.trim()) {
     try {
       const raw = await chat(
@@ -91,10 +92,12 @@ Return JSON: {"score": <0-100>, "feedback": "1-2 sentences"}`,
       } else {
         console.error("[answer] judge returned unparseable output:", JSON.stringify(raw).slice(0, 500));
         judge = { score: mcqCorrect ? 60 : 30, feedback: "Answer saved — automatic grading was unavailable this time." };
+        graded = false;
       }
     } catch (e: any) {
       console.error("[answer] judge call failed:", e?.message || e);
       judge = { score: mcqCorrect ? 60 : 30, feedback: "Answer saved — automatic grading was unavailable this time." };
+      graded = false;
     }
   }
 
@@ -105,6 +108,7 @@ Return JSON: {"score": <0-100>, "feedback": "1-2 sentences"}`,
     mcq_correct: mcqCorrect,
     followup_score: judge.score,
     feedback: judge.feedback,
+    graded, // false = grading fell back; client can offer a retry
   };
 
   // Merge into responses (replace if re-answered).
