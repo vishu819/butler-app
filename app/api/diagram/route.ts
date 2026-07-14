@@ -85,3 +85,26 @@ export async function GET() {
     .limit(50);
   return NextResponse.json({ diagrams: data || [] });
 }
+
+// DELETE { id } -> remove a saved diagram.
+export async function DELETE(req: Request) {
+  const supabase = await createClient();
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "invalid body" }, { status: 400 });
+  }
+  if (!body?.id) return NextResponse.json({ error: "id required" }, { status: 400 });
+  const { error } = await supabase
+    .from("concept_diagrams")
+    .delete()
+    .eq("id", body.id)
+    .eq("user_id", user.id);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
+}

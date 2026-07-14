@@ -1,26 +1,27 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Home, Dumbbell, BarChart3, BookOpen, MessageCircle } from "lucide-react";
+import { Home, Dumbbell, BarChart3, MessageCircle, LayoutGrid } from "lucide-react";
 import Goals from "./Goals";
 import Session from "./Session";
 import Coach, { GREETING, type Msg } from "./Coach";
 import Profile from "./Profile";
 import BrainGym from "./BrainGym";
 import Library from "./Library";
+import News from "./News";
 import StatHeader from "./StatHeader";
-import AccountPanel from "./AccountPanel";
+import AvatarMenu from "./AvatarMenu";
 import { cachedGet, prefetch } from "@/lib/fetch-cache";
 
-type Tab = "home" | "practice" | "progress" | "library" | "coach";
+type Tab = "home" | "practice" | "progress" | "coach" | "others";
 type Stats = { progress: number; rating: number; streak: number };
 
 const TABS: { key: Tab; label: string; Icon: typeof Home }[] = [
   { key: "home", label: "Home", Icon: Home },
   { key: "practice", label: "Practice", Icon: Dumbbell },
   { key: "progress", label: "Progress", Icon: BarChart3 },
-  { key: "library", label: "Library", Icon: BookOpen },
   { key: "coach", label: "Coach", Icon: MessageCircle },
+  { key: "others", label: "Others", Icon: LayoutGrid },
 ];
 
 export default function Dashboard({ name, email }: { name: string; email: string }) {
@@ -81,15 +82,8 @@ export default function Dashboard({ name, email }: { name: string; email: string
             <h1 className="text-xl font-bold leading-tight tracking-tight">{name}</h1>
           </div>
         </div>
-        {/* Account → jumps to Progress tab where account/actions live */}
-        <button
-          onClick={() => setTab("progress")}
-          aria-label="Account"
-          className="flex h-10 w-10 items-center justify-center rounded-full text-sm font-bold transition-transform active:scale-90"
-          style={{ background: "var(--accent-soft)", color: "var(--accent)" }}
-        >
-          {name.trim().charAt(0).toUpperCase() || "?"}
-        </button>
+        {/* Account menu (logout, password, reset, start fresh) */}
+        <AvatarMenu name={name} />
       </header>
 
       {/* content — keyed so it re-animates on tab change */}
@@ -104,13 +98,13 @@ export default function Dashboard({ name, email }: { name: string; email: string
           </div>
         )}
         {tab === "practice" && <BrainGym />}
-        {tab === "progress" && (
-        <div className="space-y-4">
-          <Profile />
-          <AccountPanel name={name} email={email} />
-        </div>
-      )}
-        {tab === "library" && <Library />}
+        {tab === "progress" && <Profile />}
+        {tab === "others" && (
+          <div className="space-y-4">
+            <News />
+            <Library />
+          </div>
+        )}
       </div>
 
       {/* Coach stays mounted to preserve conversation */}
