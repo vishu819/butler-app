@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { chat } from "@/lib/openrouter";
 import { buildSkillState, generateQuiz, QUIZ_TITLE } from "@/lib/quiz-gen";
+import { BRAIN_CATEGORIES, nextCategory } from "@/lib/brain-gym";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -66,26 +67,45 @@ export async function GET(req: Request) {
     }
   }
 
-  // ---- Brain gym ----
+  // ---- Brain gym (rotating category so every aspect gets trained) ----
   if (!have.has("brain_gym")) {
     try {
+      // Determine the next category from the single user's recent history.
+      const { data: prof } = await admin.from("profiles").select("id").limit(1).maybeSingle();
+      let recent: string[] = [];
+      if (prof) {
+        const { data: log } = await admin
+          .from("brain_gym_log")
+          .select("category")
+          .eq("user_id", prof.id)
+          .order("created_at", { ascending: false })
+          .limit(BRAIN_CATEGORIES.length);
+        recent = (log || []).map((l) => l.category);
+      }
+      const category = nextCategory(recent);
+      const cat = BRAIN_CATEGORIES.find((c) => c.key === category)!;
+
       const raw = await chat(
         [
           {
             role: "system",
-            content:
-              "You create one short daily brain-gym exercise (logic, lateral thinking, pattern, mental math, or memory). It should take 2-5 minutes. Return JSON only.",
+            content: `You create one short daily brain-gym exercise in the "${cat.label}" category (${cat.desc}). It should be solvable in about ${Math.round(cat.seconds / 60)} minutes. Return JSON only.`,
           },
           {
             role: "user",
             content:
-              'Return JSON: {"kind": string, "prompt": string, "answer": string, "why": string}. Make it fun and genuinely stretching.',
+              'Return JSON: {"kind": string, "prompt": string, "answer": string, "why": string}. Make it fun and genuinely stretching, and clearly in the stated category.',
           },
         ],
         { json: true, temperature: 1.0, maxTokens: 700, timeoutMs: 30000 }
       );
-      rows.push({ content_date: today, type: "brain_gym", payload: JSON.parse(raw) });
-      results.brain_gym = "ok";
+      const parsed = JSON.parse(raw);
+      rows.push({
+        content_date: today,
+        type: "brain_gym",
+        payload: { ...parsed, category, seconds: cat.seconds },
+      });
+      results.brain_gym = `ok (${category})`;
     } catch (e: any) {
       results.brain_gym = `error: ${e.message}`;
     }
@@ -137,7 +157,87 @@ export async function GET(req: Request) {
     results.summary = `error: ${e.message}`;
   }
 
+  // ---- Daily learning digest: what the user learned from yesterday's quiz ----
+  try {
+    results.learning = await summarizeLearning(admin);
+  } catch (e: any) {
+    results.learning = `error: ${e.message}`;
+  }
+
   return NextResponse.json({ date: today, results });
+}
+
+// Review yesterday's quiz (questions + right/wrong) and write "what you learned today".
+async function summarizeLearning(
+  admin: ReturnType<typeof createAdminClient>
+): Promise<string> {
+  const now = new Date();
+  const y = new Date(now);
+  y.setUTCDate(y.getUTCDate() - 1);
+  const dayKey = y.toISOString().slice(0, 10);
+
+  const { data: prof } = await admin.from("profiles").select("id").limit(1).maybeSingle();
+  const userId = prof?.id;
+  if (!userId) return "skip: no user";
+
+  // Idempotent — already summarized this day?
+  const { data: existing } = await admin
+    .from("daily_learning")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("learn_date", dayKey)
+    .maybeSingle();
+  if (existing) return "exists";
+
+  // Yesterday's quiz + result.
+  const { data: qc } = await admin
+    .from("daily_content")
+    .select("payload")
+    .eq("content_date", dayKey)
+    .eq("type", "eng_q")
+    .maybeSingle();
+  const questions = ((qc?.payload as any)?.questions || []) as any[];
+  if (questions.length === 0) return "skip: no quiz";
+
+  const { data: result } = await admin
+    .from("quiz_results")
+    .select("score, total, answers")
+    .eq("user_id", userId)
+    .eq("quiz_date", dayKey)
+    .maybeSingle();
+  const answers = (result?.answers || []) as { qi: number; isCorrect: boolean }[];
+  const correctSet = new Set(answers.filter((a) => a.isCorrect).map((a) => a.qi));
+
+  const qList = questions
+    .map((q, i) => {
+      const status = result ? (correctSet.has(i) ? "✓ got right" : "✗ missed") : "not answered";
+      return `- [${q.concept}] ${q.question} (${status})\n  Key idea: ${q.explanation}`;
+    })
+    .join("\n");
+
+  const summary = await chat(
+    [
+      {
+        role: "system",
+        content:
+          "You write a short 'what you learned today' recap for an engineer studying to become an architect. Given the day's quiz questions, their key ideas, and which the learner got right/wrong, produce an encouraging Markdown recap: a one-line intro, 3-6 bullet takeaways (emphasize concepts they MISSED as things to reinforce), and a one-line 'focus tomorrow'. Concise, concrete, no fluff.",
+      },
+      { role: "user", content: `Date: ${dayKey}\nScore: ${result ? `${result.score}/${result.total}` : "n/a"}\n\nQuestions:\n${qList}` },
+    ],
+    { temperature: 0.5, maxTokens: 500, timeoutMs: 40000 }
+  );
+
+  const concepts = questions.map((q) => q.concept).filter(Boolean).slice(0, 12);
+  const { error } = await admin.from("daily_learning").insert({
+    user_id: userId,
+    learn_date: dayKey,
+    summary: summary.trim(),
+    concepts,
+    score: result?.score ?? null,
+    total: result?.total ?? null,
+  });
+  if (error) return `error: ${error.message}`;
+  return "ok";
 }
 
 // Roll up the previous day's coach conversation into one long-term memory row,

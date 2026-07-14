@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { Check, Plus, Target, X } from "lucide-react";
 
 type Goal = { id: string; title: string; cadence: string; done_today: boolean };
 
@@ -48,14 +49,26 @@ export default function Goals() {
     load();
   }
 
+  async function remove(id: string) {
+    setGoals((gs) => gs.filter((x) => x.id !== id));
+    await fetch("/api/goals", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id }),
+    }).catch(() => load());
+  }
+
   const doneCount = goals.filter((g) => g.done_today).length;
 
   return (
-    <section className="rounded-2xl border border-gray-200 bg-white p-4 dark:border-gray-800 dark:bg-gray-900">
-      <div className="mb-3 flex items-center justify-between">
+    <section className="card">
+      <div className="mb-3 flex items-center gap-2.5">
+        <span className="icon-tile h-9 w-9">
+          <Target size={18} />
+        </span>
         <h2 className="font-semibold">Today&apos;s Goals</h2>
         {goals.length > 0 && (
-          <span className="text-sm text-gray-500">
+          <span className="ml-auto text-sm" style={{ color: "var(--muted)" }}>
             {doneCount}/{goals.length} done
           </span>
         )}
@@ -71,9 +84,9 @@ export default function Goals() {
               <button
                 key={s.title}
                 onClick={() => add(s.title, s.cadence)}
-                className="rounded-full border border-brand-300 bg-brand-50 px-3 py-1 text-xs text-brand-700 dark:border-brand-700 dark:bg-brand-700/20 dark:text-brand-300"
+                className="chip flex items-center gap-1 transition-transform active:scale-95"
               >
-                + {s.title}
+                <Plus size={12} /> {s.title}
               </button>
             ))}
           </div>
@@ -82,22 +95,35 @@ export default function Goals() {
         <ul className="space-y-2">
           {goals.map((g) => (
             <li key={g.id}>
-              <button
-                onClick={() => toggle(g)}
-                className="flex w-full items-center gap-3 rounded-xl border border-gray-200 px-3 py-2.5 text-left active:scale-[.99] dark:border-gray-800"
+              <div
+                className="flex w-full items-center gap-3 rounded-2xl border px-3 py-2.5 text-left"
+                style={{ borderColor: "rgba(0,0,0,0.06)" }}
               >
-                <span
-                  className={`flex h-5 w-5 items-center justify-center rounded-md border ${
-                    g.done_today
-                      ? "border-brand-500 bg-brand-500 text-white"
-                      : "border-gray-300 dark:border-gray-600"
-                  }`}
+                <button
+                  onClick={() => toggle(g)}
+                  className="flex flex-1 items-center gap-3 text-left transition-transform active:scale-[.99]"
                 >
-                  {g.done_today && "✓"}
-                </span>
-                <span className={g.done_today ? "text-gray-400 line-through" : ""}>{g.title}</span>
-                <span className="ml-auto text-[10px] uppercase text-gray-400">{g.cadence}</span>
-              </button>
+                  <span
+                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded-lg border transition-all"
+                    style={
+                      g.done_today
+                        ? { background: "linear-gradient(135deg,#c9a86a,#a97f45)", borderColor: "transparent", color: "#fff" }
+                        : { borderColor: "rgba(0,0,0,0.2)" }
+                    }
+                  >
+                    {g.done_today && <Check size={13} strokeWidth={3} />}
+                  </span>
+                  <span className={g.done_today ? "text-gray-400 line-through" : ""}>{g.title}</span>
+                </button>
+                <span className="text-[10px] uppercase text-gray-400">{g.cadence}</span>
+                <button
+                  onClick={() => remove(g.id)}
+                  aria-label="Delete goal"
+                  className="shrink-0 rounded-lg p-1 text-gray-300 transition-colors hover:bg-red-50 hover:text-red-500 dark:hover:bg-red-900/20"
+                >
+                  <X size={15} />
+                </button>
+              </div>
             </li>
           ))}
         </ul>
@@ -125,7 +151,7 @@ export default function Goals() {
           <option value="weekly">weekly</option>
           <option value="monthly">monthly</option>
         </select>
-        <button className="rounded-xl bg-brand-500 px-4 text-sm font-medium text-white">Add</button>
+        <button className="btn-primary px-4">Add</button>
       </form>
     </section>
   );

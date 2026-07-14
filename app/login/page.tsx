@@ -57,15 +57,23 @@ export default function LoginPage() {
 
   return (
     <main className="mx-auto flex min-h-dvh max-w-md flex-col justify-center px-6">
-      <div className="mb-8 text-center">
-        <div className="mx-auto mb-3 flex h-16 w-16 items-center justify-center rounded-2xl bg-brand-500 text-3xl">
+      <div className="mb-8 text-center animate-pop">
+        <div
+          className="mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-3xl text-4xl"
+          style={{
+            background: "linear-gradient(135deg,#c9a86a,#a97f45)",
+            boxShadow: "0 16px 40px -12px rgba(169,127,69,.5)",
+          }}
+        >
           🎩
         </div>
-        <h1 className="text-2xl font-bold">Butler</h1>
-        <p className="text-sm text-gray-500">Your personal growth companion</p>
+        <h1 className="text-3xl font-bold tracking-tight">Butler</h1>
+        <p className="mt-1 text-sm" style={{ color: "var(--muted)" }}>
+          Your engineering mentor
+        </p>
       </div>
 
-      <form onSubmit={submit} className="space-y-3">
+      <form onSubmit={submit} className="space-y-3 animate-fade-up">
         <input
           type="email"
           required
@@ -73,7 +81,8 @@ export default function LoginPage() {
           placeholder="you@example.com"
           value={email}
           onChange={(e) => setEmail(e.target.value)}
-          className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900"
+          className="w-full rounded-2xl border bg-white/80 px-4 py-3 outline-none transition-colors focus:border-brand-500 dark:bg-gray-900/80"
+          style={{ borderColor: "rgba(0,0,0,0.1)" }}
         />
 
         {mode !== "magic" && (
@@ -85,14 +94,12 @@ export default function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             minLength={6}
-            className="w-full rounded-xl border border-gray-300 bg-white px-4 py-3 outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900"
+            className="w-full rounded-2xl border bg-white/80 px-4 py-3 outline-none transition-colors focus:border-brand-500 dark:bg-gray-900/80"
+            style={{ borderColor: "rgba(0,0,0,0.1)" }}
           />
         )}
 
-        <button
-          disabled={loading}
-          className="w-full rounded-xl bg-brand-500 px-4 py-3 font-medium text-white active:scale-[.99] disabled:opacity-60"
-        >
+        <button disabled={loading} className="btn-primary w-full py-3 disabled:opacity-60">
           {loading
             ? "…"
             : mode === "signup"

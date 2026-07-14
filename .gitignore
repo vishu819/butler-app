@@ -11,3 +11,6 @@ next-env.d.ts
 
 # local claude runtime
 .claude/
+
+# build artifact
+tsconfig.tsbuildinfo

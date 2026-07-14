@@ -30,5 +30,33 @@ export async function GET() {
     };
   });
 
-  return NextResponse.json({ skills });
+  // Summary stats for the header.
+  const tested = skills.filter((s) => s.seen > 0);
+  const progress =
+    tested.length > 0
+      ? Math.round(tested.reduce((sum, s) => sum + s.proficiency, 0) / tested.length)
+      : 0;
+  const rating = Math.round((progress / 20) * 10) / 10; // 0-100 -> 0-5, 1 decimal
+
+  // Streak: consecutive days (up to today) with any quiz result.
+  const { data: qdates } = await supabase
+    .from("quiz_results")
+    .select("quiz_date")
+    .eq("user_id", user.id)
+    .order("quiz_date", { ascending: false })
+    .limit(60);
+  const dateSet = new Set((qdates || []).map((r) => r.quiz_date));
+  let streak = 0;
+  const d = new Date();
+  // Allow the streak to count from today or yesterday (grace for "not done yet today").
+  if (!dateSet.has(d.toISOString().slice(0, 10))) d.setUTCDate(d.getUTCDate() - 1);
+  while (dateSet.has(d.toISOString().slice(0, 10))) {
+    streak++;
+    d.setUTCDate(d.getUTCDate() - 1);
+  }
+
+  return NextResponse.json({
+    skills,
+    stats: { progress, rating, streak, assessed: tested.length, total: skills.length },
+  });
 }
