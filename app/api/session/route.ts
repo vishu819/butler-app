@@ -1,9 +1,9 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { pickFocusSkills, generateSession, gatherWebContext } from "@/lib/session-gen";
+import { pickFocusSkills, generateSession } from "@/lib/session-gen";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 120; // web-grounded generation (search + large gen) can exceed 60s
 
 const PER_SKILL = 2; // 2 each × 3 focus sectors + 2 new concept ≈ 8 per day
 
@@ -31,7 +31,18 @@ export async function GET() {
   const questions = (data.questions as any[]).map((q, i) =>
     answered.has(i)
       ? q
-      : { skill: q.skill, level: q.level, concept: q.concept, question: q.question, options: q.options, followup_prompt: q.followup_prompt }
+      : {
+        skill: q.skill,
+        level: q.level,
+        concept: q.concept,
+        question: q.question,
+        options: q.options,
+        followup_prompt: q.followup_prompt,
+        // Follow-up MCQs: send question + options, strip correct/explanation.
+        followup_mcqs: Array.isArray(q.followup_mcqs)
+          ? q.followup_mcqs.map((m: any) => ({ q: m.q, options: m.options }))
+          : [],
+      }
   );
 
   return NextResponse.json({
@@ -85,10 +96,11 @@ export async function POST() {
   const newTopic = topics && topics[0] ? { topic: topics[0].topic, skill: topics[0].skill } : null;
 
   try {
-    // Web-ground the questions in real failure cases (best-effort).
-    const webContext = await gatherWebContext(focus);
-    const questions = await generateSession(focus, PER_SKILL, webContext, newTopic);
+    // The generation call is web-grounded (:online) — it pulls real incidents
+    // itself, so no separate web-context pre-fetch is needed.
+    const questions = await generateSession(focus, PER_SKILL, undefined, newTopic);
     if (questions.length === 0) {
+      console.error("[session] generation returned 0 questions (focus:", focus.map((f) => f.key).join(","), ")");
       return NextResponse.json({ error: "Couldn't build a session. Try again." }, { status: 502 });
     }
     // Mark the introduced topic as active so it isn't re-picked as "new".

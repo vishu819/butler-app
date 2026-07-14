@@ -7,6 +7,7 @@ import { invalidate } from "@/lib/fetch-cache";
 import SessionResults from "./viz/SessionResults";
 import { LearnThis, VisualizeThis } from "./viz/LearnVisualize";
 
+type FUMCQ = { q: string; options: string[]; correct?: number; explanation?: string };
 type Q = {
   skill: string;
   level: number;
@@ -14,6 +15,7 @@ type Q = {
   question: string;
   options: string[];
   followup_prompt: string;
+  followup_mcqs?: FUMCQ[];
   correct?: number;
   explanation?: string;
 };
@@ -51,6 +53,9 @@ export default function Session() {
   const [busy, setBusy] = useState(false);
   const [reveal, setReveal] = useState<{ correct: number; explanation: string } | null>(null);
   const [judge, setJudge] = useState<{ score: number; feedback: string } | null>(null);
+  // Follow-up MCQs: the revealed answers + which option the user picked for each.
+  const [fuMcqs, setFuMcqs] = useState<FUMCQ[]>([]);
+  const [fuPicks, setFuPicks] = useState<Record<number, number>>({});
 
   function load() {
     setLoading(true);
@@ -90,8 +95,8 @@ export default function Session() {
         const msg = j.leveled?.length
           ? `Leveled up: ${j.leveled.join(", ")} 🎉`
           : j.downgraded?.length
-          ? `Eased back: ${j.downgraded.join(", ")} — let's solidify basics`
-          : "Progress saved";
+            ? `Eased back: ${j.downgraded.join(", ")} — let's solidify basics`
+            : "Progress saved";
         toast(msg, j.downgraded?.length ? "info" : "good");
       } else {
         setErr(j.error || "Couldn't save progress");
@@ -111,12 +116,17 @@ export default function Session() {
       setFollowup(r.followup_text);
       setJudge({ score: r.followup_score, feedback: r.feedback });
       setReveal(questions[idx]?.explanation != null ? { correct: questions[idx].correct!, explanation: questions[idx].explanation! } : null);
+      // Restore revealed follow-up MCQs (present once the question is answered).
+      setFuMcqs(questions[idx]?.followup_mcqs || []);
+      setFuPicks((r as any).fu_picks || {});
       setPhase("reviewed");
     } else {
       setChosen(null);
       setFollowup("");
       setJudge(null);
       setReveal(null);
+      setFuMcqs([]);
+      setFuPicks({});
       setPhase("mcq");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -151,6 +161,8 @@ export default function Session() {
       if (j.reveal) {
         setReveal(j.reveal);
         setJudge({ score: j.response.followup_score, feedback: j.response.feedback });
+        setFuMcqs(j.reveal.followup_mcqs || []);
+        setFuPicks({});
         setResponses((rs) => [...rs.filter((r) => r.qi !== idx), j.response]);
         setPhase("reviewed");
         if (j.complete) {
@@ -305,8 +317,8 @@ export default function Session() {
                           v.verdict === "advance"
                             ? { background: "var(--good-soft)", color: "var(--good)" }
                             : v.verdict === "downgrade"
-                            ? { background: "var(--bad-soft)", color: "var(--bad)" }
-                            : { background: "var(--warn-soft)", color: "var(--warn)" }
+                              ? { background: "var(--bad-soft)", color: "var(--bad)" }
+                              : { background: "var(--warn-soft)", color: "var(--warn)" }
                         }
                       >
                         {v.skill}: {v.verdict}
@@ -439,6 +451,51 @@ export default function Session() {
                 {reveal.explanation}
               </p>
             )}
+
+            {/* Deeper follow-up MCQs on the same concept (graded locally) */}
+            {fuMcqs.length > 0 && (
+              <div className="space-y-2.5 pt-1">
+                <p className="section-label">Go deeper · {Object.keys(fuPicks).length}/{fuMcqs.length}</p>
+                {fuMcqs.map((fm, fi) => {
+                  const picked = fuPicks[fi];
+                  const answered = picked !== undefined;
+                  return (
+                    <div key={fi} className="rounded-xl border p-3" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
+                      <p className="mb-2 text-sm font-medium">{fm.q}</p>
+                      <div className="space-y-1.5">
+                        {fm.options.map((opt, oi) => {
+                          const isPick = picked === oi;
+                          const isCorrect = answered && oi === fm.correct;
+                          const isWrongPick = answered && isPick && oi !== fm.correct;
+                          let style: React.CSSProperties = { borderColor: "rgba(0,0,0,0.1)" };
+                          if (isCorrect) style = { borderColor: "var(--good)", background: "var(--good-soft)" };
+                          else if (isWrongPick) style = { borderColor: "var(--bad)", background: "var(--bad-soft)" };
+                          return (
+                            <button
+                              key={oi}
+                              disabled={answered}
+                              onClick={() => setFuPicks((p) => ({ ...p, [fi]: oi }))}
+                              className="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all active:scale-[.99] disabled:cursor-default"
+                              style={style}
+                            >
+                              <span className="flex-1">{opt}</span>
+                              {isCorrect && <span style={{ color: "var(--good)" }}>✓</span>}
+                              {isWrongPick && <span style={{ color: "var(--bad)" }}>✗</span>}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {answered && fm.explanation && (
+                        <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                          {fm.explanation}
+                        </p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
             {/* Go deeper on this concept */}
             <div className="flex flex-wrap gap-2">
               <LearnThis concept={q.concept} question={q.question} />

@@ -4,6 +4,13 @@ import { chat } from "@/lib/openrouter";
 import { modelFor } from "@/lib/models";
 import { SKILLS, SKILL_KEYS, LEVEL_NAME } from "@/lib/skills";
 
+export type FollowupMCQ = {
+  q: string;
+  options: string[];
+  correct: number;
+  explanation: string;
+};
+
 export type SessionQuestion = {
   skill: string;
   level: number;
@@ -13,6 +20,7 @@ export type SessionQuestion = {
   correct: number;
   explanation: string;
   followup_prompt: string; // the open question the user types an answer to
+  followup_mcqs?: FollowupMCQ[]; // 3 deeper MCQs on the same concept (graded locally)
 };
 
 type SkillRow = { skill: string; level?: number; proficiency?: number; seen?: number };
@@ -99,14 +107,19 @@ export async function generateSession(
         content: `Generate a focused daily session. The learner should LEARN SOMETHING NEW today AND reinforce a weak area:
 ${spec}${newSpec}
 ${webContext ? `\nGround the questions in this real reference material:\n${webContext}\n` : ""}
-For each question provide a multiple-choice question AND a follow-up open question (the learner will TYPE a short answer to the follow-up — it should push them to explain the tradeoff or reasoning behind the MCQ answer). For the NEW concept, the explanation should genuinely teach it.
+USE WEB SEARCH to ground questions in REAL, current material: recent postmortems, well-known outages, up-to-date best practices, and real system designs for these topics. Base scenarios on things that actually happened (name the company/system/incident where you can) rather than invented examples.
 
-Return JSON:
-{"questions":[{"skill":"the skill key","level":<the level number>,"concept":"short tag e.g. 'write-heavy sharding'","question":"specific MCQ","options":["A","B","C","D"],"correct":0,"explanation":"3-5 sentences teaching the principle","followup_prompt":"an open question probing WHY / the tradeoff, answerable in 2-3 sentences"}]}
-Exactly 4 options each, vary the correct index. Make scenarios concrete (real numbers, real failure modes).`,
+For each question provide: (a) a multiple-choice question, (b) a follow-up OPEN question the learner types a short answer to (push them to explain the tradeoff/reasoning), and (c) exactly 3 deeper follow-up MULTIPLE-CHOICE questions on the SAME concept that drill progressively into the tradeoff/edge-cases (each stands alone, graded automatically). For the NEW concept, the explanation should genuinely teach it.
+
+Return ONLY a JSON object (no prose, no citations outside the JSON):
+{"questions":[{"skill":"the skill key","level":<the level number>,"concept":"short tag e.g. 'write-heavy sharding'","question":"specific MCQ","options":["A","B","C","D"],"correct":0,"explanation":"3-5 sentences teaching the principle","followup_prompt":"an open question probing WHY / the tradeoff, answerable in 2-3 sentences","followup_mcqs":[{"q":"a deeper MCQ on the same concept","options":["A","B","C","D"],"correct":0,"explanation":"1-2 sentences on why"}]}]}
+Exactly 4 options for every MCQ (main and follow-ups), vary the correct index. Exactly 3 items in followup_mcqs. Make scenarios concrete (real numbers, real failure modes).`,
       },
     ],
-    { model: modelFor("generate"), json: true, temperature: 0.8, maxTokens: 6000, timeoutMs: 58000 }
+    // :online grounds questions in real incidents/best-practices. json:true keeps
+    // the output parseable; salvageQuestions() recovers if the web plugin adds
+    // stray prose or the response truncates. 16000 tokens fits 8 rich questions.
+    { model: modelFor("generate"), online: true, json: true, temperature: 0.8, maxTokens: 16000, timeoutMs: 75000 }
   );
 
   return parseSession(raw);
@@ -117,11 +130,18 @@ export function parseSession(raw: string): SessionQuestion[] {
   try {
     obj = JSON.parse(raw);
   } catch {
-    return [];
+    // Salvage a truncated response: recover whole question objects even when the
+    // tail is cut off (finish_reason: length). Beats returning zero questions.
+    obj = salvageQuestions(raw);
+    if (!obj) return [];
   }
   const arr = Array.isArray(obj?.questions) ? obj.questions : [];
   return arr
-    .map((q: any) => ({ ...q, skill: SKILL_KEYS.includes(q?.skill) ? q.skill : null }))
+    .map((q: any) => ({
+      ...q,
+      skill: SKILL_KEYS.includes(q?.skill) ? q.skill : null,
+      followup_mcqs: sanitizeFollowupMCQs(q?.followup_mcqs),
+    }))
     .filter(
       (q: any): q is SessionQuestion =>
         q &&
@@ -135,4 +155,70 @@ export function parseSession(raw: string): SessionQuestion[] {
         typeof q.explanation === "string" &&
         typeof q.followup_prompt === "string"
     );
+}
+
+// Recover complete question objects from a truncated JSON string (the model hit
+// the token cap mid-array). Walks the top-level questions array, extracting each
+// balanced {...} object and dropping the final incomplete one.
+function salvageQuestions(raw: string): { questions: any[] } | null {
+  const start = raw.indexOf('"questions"');
+  if (start === -1) return null;
+  const bracket = raw.indexOf("[", start);
+  if (bracket === -1) return null;
+
+  const objects: any[] = [];
+  let depth = 0;
+  let objStart = -1;
+  let inStr = false;
+  let esc = false;
+
+  for (let i = bracket + 1; i < raw.length; i++) {
+    const c = raw[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (c === "\\") esc = true;
+      else if (c === '"') inStr = false;
+      continue;
+    }
+    if (c === '"') inStr = true;
+    else if (c === "{") {
+      if (depth === 0) objStart = i;
+      depth++;
+    } else if (c === "}") {
+      depth--;
+      if (depth === 0 && objStart !== -1) {
+        try {
+          objects.push(JSON.parse(raw.slice(objStart, i + 1)));
+        } catch {
+          /* skip a malformed object */
+        }
+        objStart = -1;
+      }
+    }
+  }
+  return objects.length ? { questions: objects } : null;
+}
+
+// Keep only well-formed follow-up MCQs (4 options, valid correct index). Missing
+// or malformed follow-ups just yield an empty list — the main question still stands.
+function sanitizeFollowupMCQs(raw: any): FollowupMCQ[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .filter(
+      (m: any): m is FollowupMCQ =>
+        m &&
+        typeof m.q === "string" &&
+        Array.isArray(m.options) &&
+        m.options.length === 4 &&
+        Number.isInteger(m.correct) &&
+        m.correct >= 0 &&
+        m.correct <= 3
+    )
+    .slice(0, 3)
+    .map((m: any) => ({
+      q: m.q,
+      options: m.options,
+      correct: m.correct,
+      explanation: typeof m.explanation === "string" ? m.explanation : "",
+    }));
 }

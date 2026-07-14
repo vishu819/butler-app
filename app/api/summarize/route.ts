@@ -5,7 +5,7 @@ import { chat } from "@/lib/openrouter";
 import { modelFor } from "@/lib/models";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 90;
 
 // POST { url, title, kind } -> a short summary of a paper/article.
 // Cached by URL in feed_summaries so re-open is instant.
@@ -41,15 +41,15 @@ export async function POST(req: Request) {
         {
           role: "system",
           content: isPaper
-            ? "You explain classic computer-science papers to a senior engineer studying to be an architect. Read the paper at the given URL. Write concise Markdown: a one-line summary, a '## Key ideas' bulleted section (3-5 bullets), a '## Why architects care' section, and a '## In one sentence' takeaway. Under ~300 words. No fluff."
-            : "You summarize engineering-blog articles for a senior engineer studying to be an architect. Read the article at the given URL. Write concise Markdown: a one-line summary, a '## Key ideas' bulleted section (3-5 bullets), a '## Architecture lesson' section, and a '## In one sentence' takeaway. Under ~300 words. No fluff.",
+            ? "You explain classic computer-science papers to a senior engineer studying to be an architect. Read the paper at the given URL and write a THOROUGH, detailed study guide in Markdown (aim for 700-900 words). Use these sections:\n## Overview — 2-3 sentences on what the paper introduces and the problem it solves.\n## The problem — what was broken/hard before this work, with concrete context.\n## Key ideas — 5-8 bullets, each explaining a core concept or mechanism in depth (not just naming it — explain HOW it works and WHY it matters).\n## How it works — a walkthrough of the actual technique/algorithm/architecture, step by step.\n## Tradeoffs & limitations — what it sacrifices, when it breaks down, criticisms.\n## Why architects care — concrete lessons and where these ideas show up in real systems today (name real systems).\n## In one sentence — the crisp takeaway.\nBe specific and technical. Prefer real detail over hand-waving. No filler."
+            : "You summarize engineering-blog articles for a senior engineer studying to be an architect. Read the article at the given URL and write a THOROUGH, detailed breakdown in Markdown (aim for 700-900 words). Use these sections:\n## Overview — 2-3 sentences on what the article is about and the context.\n## The problem — what challenge/incident/scale pressure prompted this work.\n## Key ideas — 5-8 bullets, each explaining a decision, technique, or insight in depth (explain the reasoning, not just the what).\n## How they did it — a walkthrough of the actual approach, architecture, or solution.\n## Tradeoffs & what they'd change — costs, limitations, lessons learned, what didn't work.\n## Architecture lessons — generalizable principles an architect should take away, and where they apply elsewhere.\n## In one sentence — the crisp takeaway.\nBe specific and technical. Prefer real detail and real numbers over hand-waving. No filler.",
         },
         {
           role: "user",
           content: `Summarize this ${isPaper ? "paper" : "article"}: "${title || url}"\nURL: ${url}`,
         },
       ],
-      { model: modelFor("web"), online: true, maxTokens: 700, timeoutMs: 50000 }
+      { model: modelFor("web"), online: true, maxTokens: 2000, timeoutMs: 75000 }
     );
   } catch (e: any) {
     return NextResponse.json({ error: e.message || "summary failed" }, { status: 502 });
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
     createAdminClient()
       .from("feed_summaries")
       .upsert({ url, title: title || null, kind: isPaper ? "paper" : "article", summary }, { onConflict: "url" })
-      .then(() => {});
+      .then(() => { });
   } catch {
     /* best-effort */
   }

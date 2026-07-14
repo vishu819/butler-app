@@ -89,9 +89,11 @@ Return JSON: {"score": <0-100>, "feedback": "1-2 sentences"}`,
       if (parsed) {
         judge = { score: Math.max(0, Math.min(100, parsed.score ?? 0)), feedback: parsed.feedback || "" };
       } else {
+        console.error("[answer] judge returned unparseable output:", JSON.stringify(raw).slice(0, 500));
         judge = { score: mcqCorrect ? 60 : 30, feedback: "Answer saved — automatic grading was unavailable this time." };
       }
-    } catch {
+    } catch (e: any) {
+      console.error("[answer] judge call failed:", e?.message || e);
       judge = { score: mcqCorrect ? 60 : 30, feedback: "Answer saved — automatic grading was unavailable this time." };
     }
   }
@@ -113,9 +115,14 @@ Return JSON: {"score": <0-100>, "feedback": "1-2 sentences"}`,
   await supabase.from("sessions").update({ responses, status }).eq("id", session.id);
 
   // Return full question detail now that it's answered (correct + explanation).
+  // Include follow-up MCQs with their answers so the client can grade them locally.
   return NextResponse.json({
     response,
-    reveal: { correct: q.correct, explanation: q.explanation },
+    reveal: {
+      correct: q.correct,
+      explanation: q.explanation,
+      followup_mcqs: Array.isArray(q.followup_mcqs) ? q.followup_mcqs : [],
+    },
     complete: status === "complete",
   });
 }

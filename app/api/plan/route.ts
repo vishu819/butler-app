@@ -7,6 +7,28 @@ import { SKILLS, SKILL_KEYS } from "@/lib/skills";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// Tolerant parse: the model may wrap JSON in ```fences``` or add stray prose.
+// Recover the JSON object either way.
+function parsePlan(raw: string): { modules?: any[] } | null {
+  if (!raw) return null;
+  let txt = raw.trim();
+  const fence = txt.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) txt = fence[1].trim();
+  try {
+    return JSON.parse(txt);
+  } catch {
+    const obj = txt.match(/\{[\s\S]*\}/);
+    if (obj) {
+      try {
+        return JSON.parse(obj[0]);
+      } catch {
+        return null;
+      }
+    }
+    return null;
+  }
+}
+
 // GET -> the learner's curriculum plan + profile.
 export async function GET() {
   const supabase = await createClient();
@@ -83,7 +105,8 @@ Return JSON:
       ],
       { model: modelFor("generate"), json: true, temperature: 0.6, maxTokens: 2500, timeoutMs: 55000 }
     );
-    const parsed = JSON.parse(raw);
+    const parsed = parsePlan(raw);
+    if (!parsed) return NextResponse.json({ error: "Couldn't build a plan. Try again." }, { status: 502 });
     // Flatten modules -> ordered topic rows.
     let pos = 0;
     plan = [];
