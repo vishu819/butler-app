@@ -268,7 +268,7 @@ export default function Session() {
     }
   }
 
-  if (loading) return <p className="text-sm text-gray-400">Loading today&apos;s session…</p>;
+  if (loading) return <div className="skeleton h-24 rounded-3xl" />;
 
   // No session yet
   if (questions.length === 0) {

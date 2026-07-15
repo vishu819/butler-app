@@ -56,27 +56,37 @@ export default function Dashboard({ name, email }: { name: string; email: string
 
   const [stats, setStats] = useState<Stats | null>(null);
   useEffect(() => {
-    // First-run setup: ensure a baseline profile + build the plan if missing.
-    fetch("/api/init", { method: "POST" })
-      .then((r) => r.json())
-      .then((j) => {
-        if (j.needsPlan) fetch("/api/plan", { method: "POST" }).catch(() => {});
-      })
-      .catch(() => {});
-
+    // CRITICAL for the Home paint: the header stats + today's session.
     cachedGet("/api/profile")
       .then((j) => j.stats && setStats(j.stats))
       .catch(() => {});
-    // Prefetch the other tabs' data so switching is instant.
     prefetch("/api/session");
-    prefetch("/api/plan");
-    prefetch("/api/learning");
     prefetch("/api/goals");
+
+    // Non-critical: run after first paint so they don't compete with the above.
+    const t = setTimeout(() => {
+      // First-run setup: ensure a baseline profile + build the plan if missing.
+      fetch("/api/init", { method: "POST" })
+        .then((r) => r.json())
+        .then((j) => {
+          if (j.needsPlan) fetch("/api/plan", { method: "POST" }).catch(() => {});
+        })
+        .catch(() => {});
+      // Warm the remaining tabs.
+      prefetch("/api/plan");
+      prefetch("/api/learning");
+    }, 400);
+    return () => clearTimeout(t);
   }, []);
 
   const [messages, setMessages] = useState<Msg[]>([GREETING]);
   const [sending, setSending] = useState(false);
+  const [chatLoaded, setChatLoaded] = useState(false);
+  // Coach history loads only when the Coach tab is first opened — not on every
+  // page load (it was fetching on mount even if you never open Coach).
   useEffect(() => {
+    if (tab !== "coach" || chatLoaded) return;
+    setChatLoaded(true);
     fetch("/api/chat")
       .then((r) => r.json())
       .then((j) => {
@@ -84,7 +94,7 @@ export default function Dashboard({ name, email }: { name: string; email: string
         if (hist.length) setMessages([GREETING, ...hist]);
       })
       .catch(() => {});
-  }, []);
+  }, [tab, chatLoaded]);
 
   return (
     <main className="mx-auto max-w-2xl px-4 pb-28 pt-6">

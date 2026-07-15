@@ -56,7 +56,18 @@ export default function Profile() {
     load();
   }, []);
 
-  if (loading) return <p className="text-sm text-gray-400">Loading your dashboard…</p>;
+  if (loading)
+    return (
+      <div className="space-y-4">
+        <div className="skeleton h-40 rounded-3xl" />
+        <div className="grid grid-cols-3 gap-2">
+          <div className="skeleton h-16 rounded-2xl" />
+          <div className="skeleton h-16 rounded-2xl" />
+          <div className="skeleton h-16 rounded-2xl" />
+        </div>
+        <div className="skeleton h-52 rounded-3xl" />
+      </div>
+    );
 
   const tested = skills.filter((s) => s.seen > 0);
   const strong = [...tested].sort((a, b) => b.proficiency - a.proficiency).slice(0, 3);

@@ -2,6 +2,16 @@ import { createServerClient } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function middleware(request: NextRequest) {
+  const path = request.nextUrl.pathname;
+
+  // API routes authenticate themselves (they call getUser and return 401), so
+  // the middleware doesn't need a second Supabase round-trip for them. This
+  // removes a network hop from EVERY /api/* request — the main load-time cost.
+  if (path.startsWith("/api/")) return NextResponse.next();
+
+  // The login page is public.
+  if (path.startsWith("/login")) return NextResponse.next();
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -23,15 +33,12 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  const path = request.nextUrl.pathname;
-  const isPublic = path.startsWith("/login") || path.startsWith("/api/cron");
+  // getClaims() validates the JWT locally (no network round-trip in the common
+  // case), unlike getUser() which always calls the Supabase auth server.
+  const { data } = await supabase.auth.getClaims();
 
   // Not signed in and hitting a protected page -> go to login.
-  if (!user && !isPublic) {
+  if (!data?.claims) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
@@ -41,6 +48,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  // Run on everything except static assets & the manifest/icons.
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|icons/|sw.js).*)"],
+  // Only guard page navigations. Skip static assets, API routes (self-authed),
+  // and the manifest/icons/service worker.
+  matcher: [
+    "/((?!api/|_next/static|_next/image|favicon.ico|manifest.webmanifest|icons/|sw.js).*)",
+  ],
 };

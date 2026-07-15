@@ -1,19 +1,27 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import mermaid from "mermaid";
+import type { Mermaid as MermaidAPI } from "mermaid";
 
+// Mermaid is a large (~500KB) library only needed when a diagram is shown, so it
+// is loaded lazily via dynamic import() — this keeps it OUT of the main bundle
+// (it was previously statically imported and shipped on every page).
+let mermaidPromise: Promise<MermaidAPI> | null = null;
 let initialized = false;
 let renderCounter = 0;
 
-function ensureInitialized() {
-  if (initialized) return;
-  mermaid.initialize({
-    startOnLoad: false,
-    theme: "neutral",
-    securityLevel: "strict",
-  });
-  initialized = true;
+function loadMermaid(): Promise<MermaidAPI> {
+  if (!mermaidPromise) {
+    mermaidPromise = import("mermaid").then((m) => {
+      const mermaid = m.default;
+      if (!initialized) {
+        mermaid.initialize({ startOnLoad: false, theme: "neutral", securityLevel: "strict" });
+        initialized = true;
+      }
+      return mermaid;
+    });
+  }
+  return mermaidPromise;
 }
 
 export default function Mermaid({ chart }: { chart: string }) {
@@ -27,7 +35,7 @@ export default function Mermaid({ chart }: { chart: string }) {
     async function render() {
       setError(false);
       try {
-        ensureInitialized();
+        const mermaid = await loadMermaid();
         const { svg } = await mermaid.render(idRef.current, chart);
         if (!cancelled) setSvg(svg);
       } catch {
