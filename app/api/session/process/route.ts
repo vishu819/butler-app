@@ -35,11 +35,15 @@ export async function POST() {
   const transcript = questions
     .map((q, i) => {
       const r = responses.find((x) => x.qi === i);
+      const fuLine =
+        r?.fu_total
+          ? `\n  Deeper follow-up MCQs: ${r.fu_correct}/${r.fu_total} correct`
+          : "";
       return `Q${i + 1} [${SKILL_LABEL[q.skill] || q.skill}, level ${q.level}] concept: ${q.concept}
   MCQ: ${r?.mcq_correct ? "CORRECT" : "WRONG"}
   Follow-up asked: ${q.followup_prompt}
   Their written answer: "${r?.followup_text || "(blank)"}"
-  Graded: ${r?.followup_score ?? "n/a"}/100 — ${r?.feedback || ""}`;
+  Graded: ${r?.followup_score ?? "n/a"}/100 — ${r?.feedback || ""}${fuLine}`;
     })
     .join("\n\n");
 
@@ -94,7 +98,7 @@ ${hist || "  (no prior history at this level)"}`;
         {
           role: "system",
           content:
-            "You are Butler, a rigorous but PATIENT mentor. You judge a learner's readiness to change level based on their CUMULATIVE record across many sessions — never on a single day. Read today's written explanations (they reveal real understanding: a right MCQ with a shallow explanation = half-understanding, NOT ready) IN THE CONTEXT of their history trend. Rules: default to 'hold'. Only 'advance' when a skill is marked ELIGIBLE and the trend shows consistently strong, deep understanding sustained over multiple sessions — genuine confidence, not one good day. Only 'downgrade' if their answers reveal clearly broken basics (this may happen even before eligibility). Be conservative: it is better to hold and keep building confidence than to move too early. Return JSON only.",
+            "You are Butler, a rigorous but PATIENT mentor. You judge a learner's readiness to change level based on their CUMULATIVE record across many sessions — never on a single day. Weigh three signals per question: the MCQ (recognition), the written explanation (depth of understanding — a right MCQ with a shallow explanation = half-understanding, NOT ready), and the deeper follow-up MCQs (whether they hold up when the concept is probed from other angles — strong follow-up scores are good corroborating evidence, weak ones expose shallow grasp). Read all of this IN THE CONTEXT of their history trend. Rules: default to 'hold'. Only 'advance' when a skill is marked ELIGIBLE and the trend shows consistently strong, deep understanding sustained over multiple sessions — genuine confidence, not one good day. Only 'downgrade' if their answers reveal clearly broken basics (this may happen even before eligibility). Be conservative: it is better to hold and keep building confidence than to move too early. Return JSON only.",
         },
         {
           role: "user",

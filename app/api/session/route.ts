@@ -32,17 +32,17 @@ export async function GET() {
     answered.has(i)
       ? q
       : {
-        skill: q.skill,
-        level: q.level,
-        concept: q.concept,
-        question: q.question,
-        options: q.options,
-        followup_prompt: q.followup_prompt,
-        // Follow-up MCQs: send question + options, strip correct/explanation.
-        followup_mcqs: Array.isArray(q.followup_mcqs)
-          ? q.followup_mcqs.map((m: any) => ({ q: m.q, options: m.options }))
-          : [],
-      }
+          skill: q.skill,
+          level: q.level,
+          concept: q.concept,
+          question: q.question,
+          options: q.options,
+          followup_prompt: q.followup_prompt,
+          // Follow-up MCQs: send question + options, strip correct/explanation.
+          followup_mcqs: Array.isArray(q.followup_mcqs)
+            ? q.followup_mcqs.map((m: any) => ({ q: m.q, options: m.options }))
+            : [],
+        }
   );
 
   return NextResponse.json({
