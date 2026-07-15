@@ -136,8 +136,9 @@ export async function generateSession(
       { role: "system", content: roleFraming ? `${SYS}\n\nTARGET ROLE CONTEXT: ${roleFraming}` : SYS },
       {
         role: "user",
-        content: `Generate a focused daily session. The learner should LEARN SOMETHING NEW today AND reinforce a weak area:
+        content: `Generate a focused daily session of EXACTLY ${focus.length * perSkill + (newTopic ? 1 : 0)} questions. The learner should LEARN SOMETHING NEW today AND reinforce a weak area:
 ${spec}${pathSpec}${newSpec}
+Produce ALL of the questions listed above — do not omit any.
 ${webContext ? `\nGround the questions in this real reference material:\n${webContext}\n` : ""}
 USE WEB SEARCH to ground questions in REAL, current material: recent postmortems, well-known outages, up-to-date best practices, and real system designs for these topics. Base scenarios on things that actually happened (name the company/system/incident where you can) rather than invented examples.
 

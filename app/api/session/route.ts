@@ -6,10 +6,12 @@ import { roleFor, skillKeysForRole } from "@/lib/roles";
 export const runtime = "nodejs";
 export const maxDuration = 120; // web-grounded generation (search + large gen) can exceed 60s
 
-// Shorter daily session: 1 reinforcement question on each of 3 focus skills + 1
-// new concept ≈ 4 questions total.
+// Shorter daily session: at least TARGET questions. Normally 3 reinforcement
+// (1 each on 3 focus skills) + 1 new concept = 4. If there's no new concept to
+// introduce (plan not built yet, or everything mastered), we pick a 4th focus
+// skill instead so the session is never short.
 const PER_SKILL = 1;
-const FOCUS_COUNT = 3;
+const TARGET = 4;
 
 // GET -> today's session (without the correct answers / explanations pre-reveal).
 export async function GET() {
@@ -97,11 +99,6 @@ export async function POST() {
     .limit(3);
   const recentlyCovered = (recentSessions || []).flatMap((s) => s.focus_skills || []);
 
-  // Pick focus skills from THIS role's set only, clamped to the role's ceiling.
-  const focus = pickFocusSkills(skillRows, FOCUS_COUNT, recentlyCovered, roleSkillKeys).map(
-    (f) => ({ ...f, level: Math.min(f.level, role.ceiling) })
-  );
-
   // The learning PATH drives the session. Pull the unmastered curriculum tail:
   //  - `active` topics = what they're currently working through → reinforce these
   //  - the first `planned` topic = the next NEW concept to introduce
@@ -123,6 +120,15 @@ export async function POST() {
   const newTopic = firstPlanned
     ? { topic: firstPlanned.topic, skill: firstPlanned.skill }
     : null;
+
+  // Keep the session at TARGET questions: the new concept counts as one, so we
+  // need (TARGET - 1) focus skills when there's a new topic, else TARGET.
+  const focusCount = newTopic ? TARGET - 1 : TARGET;
+
+  // Pick focus skills from THIS role's set only, clamped to the role's ceiling.
+  const focus = pickFocusSkills(skillRows, focusCount, recentlyCovered, roleSkillKeys).map(
+    (f) => ({ ...f, level: Math.min(f.level, role.ceiling) })
+  );
 
   try {
     // The generation call is web-grounded (:online) — it pulls real incidents
