@@ -1,9 +1,10 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { chatStream } from "@/lib/openrouter";
+import { modelFor } from "@/lib/models";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+export const maxDuration = 90; // :online web search + streaming article
 
 // POST { concept, question? } -> streams a summarized study article, saves it after.
 export async function POST(req: Request) {
@@ -27,19 +28,22 @@ export async function POST(req: Request) {
     async start(controller) {
       let article = "";
       try {
-        for await (const chunk of chatStream([
-          {
-            role: "system",
-            content:
-              "You are a software-architecture tutor writing a concise study article for a senior engineer. Teach the concept clearly and practically. Use short Markdown: a one-line summary, a '## Key ideas' bulleted section, a '## In practice' section with a concrete example or tradeoff, and a '## Remember' one-liner. Keep it under ~350 words. No fluff.",
-          },
-          {
-            role: "user",
-            content: `Write a study article on the concept: "${concept}".${
-              question ? ` It came up in this quiz question: "${question}".` : ""
-            } Focus on what a software architect must understand about it.`,
-          },
-        ])) {
+        for await (const chunk of chatStream(
+          [
+            {
+              role: "system",
+              content:
+                "You are a software-engineering tutor writing a concise study article for an engineer who wants to go deep. Teach the concept clearly and practically. Use short Markdown: a one-line summary, a '## Key ideas' bulleted section, a '## In practice' section with a concrete example or tradeoff, and a '## Remember' one-liner. Then finish with a '## Go deeper' section: 3-5 of the BEST real resources to advance on this concept — canonical papers, seminal blog posts, official docs, or standout talks. USE WEB SEARCH to find real, current, high-quality links. Format each as a Markdown link '[Title — source](https://url)' with a 4-8 word note on why it's worth reading. Only include links you are confident are real and on-topic. Keep the whole article under ~450 words.",
+            },
+            {
+              role: "user",
+              content: `Write a study article on the concept: "${concept}".${
+                question ? ` It came up in this quiz question: "${question}".` : ""
+              } Focus on what an engineer must understand about it, and end with the best real links to learn more.`,
+            },
+          ],
+          { model: modelFor("web"), online: true, timeoutMs: 60000 }
+        )) {
           article += chunk;
           controller.enqueue(encoder.encode(chunk));
         }

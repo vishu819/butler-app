@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowRight, ChevronRight, HelpCircle, RotateCw, Sparkles } from "lucide-react";
+import { ArrowRight, Check, ChevronRight, HelpCircle, RotateCw, Sparkles } from "lucide-react";
+import { Spinner } from "./ui/Spinner";
 import { toast } from "./ui/Toast";
 import { invalidate } from "@/lib/fetch-cache";
 import SessionResults from "./viz/SessionResults";
@@ -29,7 +30,13 @@ type Resp = {
   graded?: boolean;
 };
 
-export default function Session() {
+export default function Session({
+  onBusyChange,
+}: {
+  // Reports long-running work (generating a session / analyzing it) up to the
+  // Dashboard so a global banner can show it even after the user switches tabs.
+  onBusyChange?: (busy: null | "generating" | "processing") => void;
+} = {}) {
   const [questions, setQuestions] = useState<Q[]>([]);
   const [responses, setResponses] = useState<Resp[]>([]);
   const [focus, setFocus] = useState<string[]>([]);
@@ -46,6 +53,11 @@ export default function Session() {
     downgraded?: string[];
     verdicts?: { skill: string; verdict: string; reasoning: string }[];
   } | null>(null);
+
+  // Surface long-running work to the Dashboard (global banner survives tab switch).
+  useEffect(() => {
+    onBusyChange?.(generating ? "generating" : processing ? "processing" : null);
+  }, [generating, processing, onBusyChange]);
 
   // per-question local state
   const [chosen, setChosen] = useState<number | null>(null);
@@ -67,13 +79,25 @@ export default function Session() {
       .then((r) => r.json())
       .then((j) => {
         if (j.session) {
-          setQuestions(j.session.questions || []);
-          setResponses(j.session.responses || []);
+          const qs = j.session.questions || [];
+          const rs = j.session.responses || [];
+          setQuestions(qs);
+          setResponses(rs);
           setFocus(j.session.focus_skills || []);
           setStatus(j.session.status || "active");
+          // Land on the first UNANSWERED question ("last remaining"), not Q1.
+          const answered = new Set(rs.map((r: Resp) => r.qi));
+          const firstUnanswered = qs.findIndex((_: Q, i: number) => !answered.has(i));
+          setIdx(firstUnanswered === -1 ? 0 : firstUnanswered);
         }
       })
       .finally(() => setLoading(false));
+  }
+
+  // Open the session flow at a specific question (from the Home tick strip).
+  function jumpTo(i: number) {
+    setIdx(i);
+    setOpen(true);
   }
   useEffect(() => {
     load();
@@ -272,6 +296,30 @@ export default function Session() {
 
   // No session yet
   if (questions.length === 0) {
+    // While generating, show an animated multi-step loader (generation is
+    // web-grounded and can take ~20-40s — this reassures it's working).
+    if (generating) {
+      return (
+        <div className="card-lime animate-fade-up">
+          <div className="flex items-center gap-3">
+            <Spinner size={20} />
+            <div>
+              <p className="font-semibold leading-tight">Building today&apos;s session…</p>
+              <p className="text-xs" style={{ color: "var(--accent-soft-ink)" }}>
+                Researching real-world scenarios & writing your questions. ~30s.
+              </p>
+            </div>
+          </div>
+          <div className="mt-3 space-y-2">
+            <div className="skeleton h-3 w-3/4 rounded-full" />
+            <div className="skeleton h-3 w-1/2 rounded-full" />
+          </div>
+          <p className="mt-3 text-xs" style={{ color: "var(--accent-soft-ink)" }}>
+            You can switch to other tabs — this keeps running.
+          </p>
+        </div>
+      );
+    }
     return (
       <div className="card animate-fade-up text-center">
         <span className="icon-tile mx-auto mb-3 h-12 w-12">
@@ -279,11 +327,11 @@ export default function Session() {
         </span>
         <h2 className="mb-1 font-semibold">Today&apos;s learning session</h2>
         <p className="mb-4 text-sm" style={{ color: "var(--muted)" }}>
-          Butler will focus on your two weakest areas today, at a depth that fits where you are —
-          building toward architect level a little each day.
+          Butler will focus on your weakest areas today, at a depth that fits where you are —
+          building toward your goal a little each day.
         </p>
         <button onClick={generate} disabled={generating} className="btn-primary">
-          {generating ? "Preparing your session…" : "Start today's session"}
+          Start today&apos;s session
         </button>
         {err && <p className="mt-2 text-xs text-red-500">{err}</p>}
       </div>
@@ -301,42 +349,61 @@ export default function Session() {
   // expanded view so the analysis banner is visible.
   if (!open && status !== "complete") {
     const done = answeredCount > 0;
+    const answeredSet = new Set(responses.map((r) => r.qi));
+    const firstUnanswered = questions.findIndex((_, i) => !answeredSet.has(i));
     return (
-      <button
-        onClick={() => setOpen(true)}
-        className="card-lime flex w-full items-center justify-between text-left transition-transform active:scale-[.99] animate-fade-up"
-      >
-        <div>
-          <p className="text-xs font-medium" style={{ color: "var(--accent-soft-ink)" }}>
-            Today&apos;s session
-          </p>
-          <p className="mt-0.5 text-lg font-bold leading-tight">
-            {done ? `${remaining} question${remaining === 1 ? "" : "s"} left` : `${questions.length} questions ready`}
-          </p>
-          {done && (
-            <div className="mt-2 flex items-center gap-2">
-              <div
-                className="h-1.5 w-28 overflow-hidden rounded-full"
-                style={{ background: "rgba(26,26,18,0.15)" }}
-              >
-                <span
-                  className="block h-full rounded-full"
-                  style={{ width: `${(answeredCount / questions.length) * 100}%`, background: "var(--accent-ink)" }}
-                />
-              </div>
-              <span className="text-xs font-semibold" style={{ color: "var(--accent-soft-ink)" }}>
-                {answeredCount}/{questions.length}
-              </span>
-            </div>
-          )}
-        </div>
-        <span
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-          style={{ background: "var(--charcoal)", color: "var(--accent-bright)" }}
+      <div className="card-lime animate-fade-up">
+        {/* Tap the header to open at the first remaining question */}
+        <button
+          onClick={() => jumpTo(firstUnanswered === -1 ? 0 : firstUnanswered)}
+          className="flex w-full items-center justify-between text-left transition-transform active:scale-[.99]"
         >
-          <ArrowRight size={19} />
-        </span>
-      </button>
+          <div>
+            <p className="text-xs font-medium" style={{ color: "var(--accent-soft-ink)" }}>
+              Today&apos;s session
+            </p>
+            <p className="mt-0.5 text-lg font-bold leading-tight">
+              {done ? `${remaining} question${remaining === 1 ? "" : "s"} left` : `${questions.length} questions ready`}
+            </p>
+          </div>
+          <span
+            className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+            style={{ background: "var(--charcoal)", color: "var(--accent-bright)" }}
+          >
+            <ArrowRight size={19} />
+          </span>
+        </button>
+
+        {/* Per-question tick strip — jump straight to any question */}
+        {questions.length > 0 && (
+          <div className="mt-3 flex flex-wrap items-center gap-1.5">
+            {questions.map((_, i) => {
+              const isAnswered = answeredSet.has(i);
+              const isNext = i === firstUnanswered;
+              return (
+                <button
+                  key={i}
+                  onClick={() => jumpTo(i)}
+                  title={`Question ${i + 1}${isAnswered ? " — answered" : isNext ? " — up next" : ""}`}
+                  className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition-transform active:scale-90"
+                  style={
+                    isAnswered
+                      ? { background: "var(--accent-ink)", color: "var(--accent-bright)" }
+                      : isNext
+                      ? { background: "var(--charcoal)", color: "var(--accent-bright)" }
+                      : { background: "rgba(26,26,18,0.12)", color: "var(--accent-soft-ink)" }
+                  }
+                >
+                  {isAnswered ? <Check size={13} strokeWidth={3} /> : i + 1}
+                </button>
+              );
+            })}
+            <span className="ml-1 text-xs font-semibold" style={{ color: "var(--accent-soft-ink)" }}>
+              {answeredCount}/{questions.length}
+            </span>
+          </div>
+        )}
+      </div>
     );
   }
 
@@ -356,9 +423,10 @@ export default function Session() {
       {status === "complete" && (
         <div className="card" style={{ background: "var(--good-soft)" }}>
           {processing ? (
-            <p className="text-sm font-medium" style={{ color: "var(--good)" }}>
-              Analyzing your session…
-            </p>
+            <div className="flex items-center gap-2.5 text-sm font-medium" style={{ color: "var(--good)" }}>
+              <Spinner size={16} />
+              <span>Analyzing your answers & updating your path…</span>
+            </div>
           ) : processed ? (
             <>
               <p className="text-sm font-semibold" style={{ color: "var(--good)" }}>
@@ -621,8 +689,14 @@ export default function Session() {
 
       {/* Safety net: all answered but not yet saved (e.g. answered out of order) */}
       {allAnswered && status !== "complete" && !processed && (
-        <button onClick={runProcess} disabled={processing} className="btn-primary w-full py-2.5">
-          {processing ? "Analyzing…" : "Finish & save progress"}
+        <button onClick={runProcess} disabled={processing} className="btn-primary flex w-full items-center justify-center gap-2 py-2.5">
+          {processing ? (
+            <>
+              <Spinner size={15} /> Analyzing…
+            </>
+          ) : (
+            "Finish & save progress"
+          )}
         </button>
       )}
 

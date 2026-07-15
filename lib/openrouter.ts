@@ -8,7 +8,7 @@ export type ChatMessage = { role: "system" | "user" | "assistant"; content: stri
 // SERVER ONLY. Caller is responsible for persisting the full text after the stream.
 export async function* chatStream(
   messages: ChatMessage[],
-  opts: { model?: string; temperature?: number; timeoutMs?: number } = {}
+  opts: { model?: string; temperature?: number; timeoutMs?: number; online?: boolean } = {}
 ): AsyncGenerator<string, void, unknown> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw new Error("OPENROUTER_API_KEY is not set");
@@ -27,7 +27,10 @@ export async function* chatStream(
         "X-Title": "PI Companion",
       },
       body: JSON.stringify({
-        model: opts.model || process.env.OPENROUTER_MODEL || "anthropic/claude-3.5-sonnet",
+        model: (() => {
+          const base = opts.model || process.env.OPENROUTER_MODEL || "anthropic/claude-3.5-sonnet";
+          return opts.online ? `${base}:online` : base;
+        })(),
         messages,
         temperature: opts.temperature ?? 0.7,
         stream: true,

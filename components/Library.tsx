@@ -5,6 +5,7 @@ import { Calendar, Sparkles, Trash2, ExternalLink } from "lucide-react";
 import Mermaid from "./Mermaid";
 import { cachedGet, invalidate } from "@/lib/fetch-cache";
 import { toast } from "./ui/Toast";
+import { Markdown } from "./ui/Markdown";
 
 type Day = { id: string; learn_date: string; summary: string; concepts: string[]; score: number | null; total: number | null };
 type Article = { id: string; concept: string; article: string; created_at: string };
@@ -185,26 +186,3 @@ function formatDate(iso: string): string {
   return new Date(Date.UTC(y, m - 1, d)).toLocaleDateString(undefined, { weekday: "short", month: "short", day: "numeric" });
 }
 
-function Markdown({ text }: { text: string }) {
-  const lines = text.split("\n");
-  const out: React.ReactNode[] = [];
-  let list: string[] = [];
-  const flush = () => {
-    if (list.length) {
-      out.push(<ul key={`ul${out.length}`} className="my-1 list-disc pl-5 text-sm text-gray-600 dark:text-gray-300">{list.map((li, i) => <li key={i}>{inline(li)}</li>)}</ul>);
-      list = [];
-    }
-  };
-  lines.forEach((raw, i) => {
-    const line = raw.trim();
-    if (!line) return flush();
-    if (line.startsWith("## ")) { flush(); out.push(<h4 key={`h${i}`} className="mt-2 text-xs font-bold uppercase tracking-wide text-gray-500">{line.slice(3)}</h4>); }
-    else if (line.startsWith("- ") || line.startsWith("* ")) list.push(line.slice(2));
-    else { flush(); out.push(<p key={`p${i}`} className="my-1 text-sm text-gray-700 dark:text-gray-300">{inline(line)}</p>); }
-  });
-  flush();
-  return <div>{out}</div>;
-}
-function inline(s: string): React.ReactNode {
-  return s.split(/(\*\*[^*]+\*\*)/g).map((p, i) => (p.startsWith("**") && p.endsWith("**") ? <strong key={i}>{p.slice(2, -2)}</strong> : <span key={i}>{p}</span>));
-}

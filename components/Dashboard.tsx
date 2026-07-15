@@ -15,6 +15,7 @@ import {
   ChevronRight,
   ChevronLeft,
 } from "lucide-react";
+import { Spinner } from "./ui/Spinner";
 import Goals from "./Goals";
 import Session from "./Session";
 import Coach, { GREETING, type Msg } from "./Coach";
@@ -26,7 +27,7 @@ import Feed from "./Feed";
 import AccountPanel from "./AccountPanel";
 import StatHeader from "./StatHeader";
 import AvatarMenu from "./AvatarMenu";
-import { cachedGet, prefetch } from "@/lib/fetch-cache";
+import { cachedGet, prefetch, invalidate } from "@/lib/fetch-cache";
 
 type Tab = "home" | "practice" | "progress" | "coach" | "others";
 type OthersPage = "news" | "papers" | "articles" | "library" | "account";
@@ -51,6 +52,12 @@ const TABS: { key: Tab; label: string; Icon: typeof Home }[] = [
 export default function Dashboard({ name, email }: { name: string; email: string }) {
   const [tab, setTab] = useState<Tab>("home");
   const [othersPage, setOthersPage] = useState<OthersPage | null>(null);
+  // Long-running Session work (generate / analyze). Session stays mounted so
+  // this survives tab switches; a banner shows it from anywhere.
+  const [sessionBusy, setSessionBusy] = useState<null | "generating" | "processing">(null);
+  // First-run curriculum build runs in the background (onboarding no longer
+  // waits for it), surfaced by a banner until the plan is ready.
+  const [planBuilding, setPlanBuilding] = useState(false);
   const hour = new Date().getHours();
   const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
 
@@ -69,11 +76,28 @@ export default function Dashboard({ name, email }: { name: string; email: string
       fetch("/api/init", { method: "POST" })
         .then((r) => r.json())
         .then((j) => {
-          if (j.needsPlan) fetch("/api/plan", { method: "POST" }).catch(() => {});
+          if (!j.needsPlan) {
+            prefetch("/api/plan");
+            return;
+          }
+          // Build the curriculum in the BACKGROUND (onboarding entered the app
+          // immediately). Show a banner until it lands, then refresh caches.
+          setPlanBuilding(true);
+          fetch("/api/plan", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ mode: "rebuild" }),
+          })
+            .catch(() => {})
+            .finally(() => {
+              setPlanBuilding(false);
+              invalidate("/api/plan");
+              invalidate("/api/session");
+              invalidate("/api/profile");
+              prefetch("/api/plan");
+            });
         })
         .catch(() => {});
-      // Warm the remaining tabs.
-      prefetch("/api/plan");
       prefetch("/api/learning");
     }, 400);
     return () => clearTimeout(t);
@@ -126,17 +150,55 @@ export default function Dashboard({ name, email }: { name: string; email: string
         <AvatarMenu name={name} />
       </header>
 
-      {/* content — keyed so it re-animates on tab change */}
-      <div key={tab}>
-        {tab === "home" && (
-          <div className="stagger space-y-4">
-            {stats && (
-              <StatHeader progress={stats.progress} rating={stats.rating} streak={stats.streak} />
-            )}
-            <Session />
-            <Goals />
-          </div>
+      {/* First-run: curriculum is building in the background (shown on every
+          tab until ready). No action needed — it just informs. */}
+      {planBuilding && (
+        <div className="card-lime mb-3 flex w-full items-center gap-3 animate-fade-up">
+          <Spinner size={18} />
+          <span className="flex-1">
+            <span className="block text-sm font-semibold leading-tight">
+              Designing your learning path…
+            </span>
+            <span className="block text-xs" style={{ color: "var(--accent-soft-ink)" }}>
+              One-time setup · you can start exploring while it finishes
+            </span>
+          </span>
+        </div>
+      )}
+
+      {/* Global session-work banner — visible on any tab while a session is
+          being generated or analyzed (the work keeps running in the background
+          because <Session /> stays mounted). Tap to jump back Home. */}
+      {sessionBusy && tab !== "home" && (
+        <button
+          onClick={() => setTab("home")}
+          className="card-lime mb-3 flex w-full items-center gap-3 text-left animate-fade-up"
+        >
+          <Spinner size={18} />
+          <span className="flex-1">
+            <span className="block text-sm font-semibold leading-tight">
+              {sessionBusy === "generating" ? "Building today's session…" : "Analyzing your session…"}
+            </span>
+            <span className="block text-xs" style={{ color: "var(--accent-soft-ink)" }}>
+              Running in the background · tap to view
+            </span>
+          </span>
+          <ChevronRight size={18} className="shrink-0" />
+        </button>
+      )}
+
+      {/* Home stays mounted so an in-flight session (generate/analyze) survives
+          switching to other tabs. Hidden — not unmounted — when off Home. */}
+      <div className={tab === "home" ? "stagger space-y-4 animate-fade-up" : "hidden"}>
+        {stats && (
+          <StatHeader progress={stats.progress} rating={stats.rating} streak={stats.streak} />
         )}
+        <Session onBusyChange={setSessionBusy} />
+        <Goals />
+      </div>
+
+      {/* Other tabs — keyed so they re-animate on switch */}
+      <div key={tab}>
         {tab === "practice" && <BrainGym />}
         {tab === "progress" && <Profile />}
         {tab === "others" && (
