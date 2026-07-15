@@ -1,104 +1,243 @@
-# 🎩 Butler — Your Engineering Mentor
+<div align="center">
 
-A personal, LLM-driven learning companion (PWA) that helps you grow into a strong
-software architect. Butler builds a model of how you think, designs an adaptive
-curriculum, and runs a daily learning session that **starts easy and ramps up only
-once you've genuinely earned it**.
+<img src="public/icons/butler-logo.svg" width="88" height="88" alt="Butler logo" />
 
-**Stack:** Next.js 14 (App Router) · TypeScript · Tailwind · Supabase (Postgres + Auth + RLS) ·
-OpenRouter (LLM, model-agnostic) · Vercel (hosting + cron). Installable PWA.
+# Butler
 
----
+**Your personal AI mentor for becoming a software architect.**
 
-## What it does
+A daily, adaptive learning companion that builds a real profile of how you think —
+your strengths, your gaps, your level — and coaches you toward architect-level
+mastery a little every day.
 
-- **🏠 Home — daily session.** Each day Butler picks your **weakest area + one new
-  concept**, web-grounds the questions in real failure cases, and asks you an MCQ
-  followed by a typed **follow-up** ("explain *why*"). An LLM grades your reasoning.
-  "Didn't get it?" rewords the question.
-- **📊 Progress — your journey.** Skill radar, per-skill levels & mastery, a learning
-  path (curriculum), stat tiles, weekly activity, and your account (change password,
-  sign out, **Start fresh**).
-- **🏋️ Practice — brain gym.** Timed cognitive workouts that rotate through 7 areas.
-- **📚 Library — learning journal.** A day-by-day recap of what you learned.
-- **💬 Coach.** A chat mentor that knows your goals, history, and skill profile.
+Next.js 15 · Supabase · OpenRouter · PWA · mobile-first
 
-## How the learning loop works
-
-Butler is **adaptive tutoring**, not model training. Adaptation lives in the *data*
-the LLM re-reads each step:
-
-1. **Create plan** (`/api/plan`) — LLM designs an ordered curriculum from your skill
-   assessment, front-loading weak areas and tradeoff-heavy topics.
-2. **Generate session** (`/api/session`) — weakest skill + one new concept, web-grounded,
-   at each skill's current level.
-3. **Answer** — MCQ + typed follow-up; the follow-up is LLM-graded (`/api/session/answer`).
-4. **Analyze** (`/api/session/process`) — the LLM judges your **cumulative record**
-   (rolling history per skill) and returns a verdict: `advance` / `hold` / `downgrade`
-   with reasoning.
-5. **Update** — code applies the verdict with **guards**: advancing requires ~4 sessions
-   of evidence at a level (confidence gate); changes are capped at ±1; downgrades allowed
-   anytime basics break. Profile, skill levels, and curriculum mastery update.
-
-Tomorrow's session reads the updated state — the loop closes.
-
-**Model-agnostic:** every LLM call routes through `lib/models.ts`, which maps roles
-(`judge` / `generate` / `web` / `coach`) to models, each overridable by env var.
+</div>
 
 ---
 
-## Setup
+## What is Butler?
 
-### 1. Database
-Open Supabase → **SQL Editor** and run [`supabase/schema.sql`](supabase/schema.sql),
-then [`supabase/all_migrations.sql`](supabase/all_migrations.sql) (idempotent — covers
-migrations 003–010: quiz, learn, skills, brain gym, diagrams, daily learning, plan,
-sessions, confidence tracking). In **Authentication → Providers → Email**, turn **off**
-"Confirm email" for instant password signup.
+Most engineers get better by accident. Butler makes it deliberate.
 
-### 2. Environment
-```bash
-cp .env.local.example .env.local   # then fill in — never commit .env.local
-```
-| Var | Where |
-|---|---|
-| `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Supabase → Settings → API |
-| `SUPABASE_SERVICE_ROLE_KEY` | same page (secret) |
-| `OPENROUTER_API_KEY` | https://openrouter.ai/keys |
-| `OPENROUTER_MODEL` | e.g. `google/gemini-2.5-flash` |
-| `OPENROUTER_MODEL_JUDGE` (optional) | a sharper model for grading |
-| `CRON_SECRET` | `openssl rand -hex 16` |
+Every day it hands you a short, **web-grounded** learning session built around the
+tradeoffs and failure modes senior engineers actually get wrong — CAP and
+partitions, sharding pitfalls, cache stampedes, idempotency myths, cascading
+failure. You answer, you explain your reasoning, and an **LLM judge** reads your
+*cumulative* record to decide — conservatively — when you've truly earned the next
+level. It never jumps you ahead on one good day.
 
-### 3. Run
+It's not a quiz app. It's a mentor that remembers.
+
+---
+
+## Screens
+
+> Screenshots live in [`docs/screenshots/`](docs/screenshots/). Drop your own PNGs
+> there (filenames listed in that folder's README) and they'll render below.
+
+<table>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/home.png" alt="Home" /></td>
+    <td width="33%"><img src="docs/screenshots/session.png" alt="Session" /></td>
+    <td width="33%"><img src="docs/screenshots/progress.png" alt="Progress" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Home</b><br/>Level, streak, today's session, goals</td>
+    <td align="center"><b>Session</b><br/>MCQ → written answer → deeper MCQs</td>
+    <td align="center"><b>Progress</b><br/>Skill map across every architect competency</td>
+  </tr>
+  <tr>
+    <td width="33%"><img src="docs/screenshots/practice.png" alt="Practice" /></td>
+    <td width="33%"><img src="docs/screenshots/others.png" alt="Others" /></td>
+    <td width="33%"><img src="docs/screenshots/papers.png" alt="Papers" /></td>
+  </tr>
+  <tr>
+    <td align="center"><b>Practice</b><br/>60-second speed-MCQ brain gym</td>
+    <td align="center"><b>Others</b><br/>News · Papers · Articles · Library · Account</td>
+    <td align="center"><b>Papers</b><br/>Curated must-reads, summarize-on-open</td>
+  </tr>
+</table>
+
+---
+
+## Features
+
+### 🎯 Adaptive daily sessions
+- ~8 questions a day spanning **all** architect competencies (weighted toward your
+  weak areas, cycling the rest over the week), plus one brand-new concept.
+- **Web-grounded** (`:online`): questions draw on real incidents, postmortems, and
+  current best practices — not invented toy examples.
+- Each question is **MCQ → typed explanation → 3 deeper follow-up MCQs** on the same
+  concept, so recognition, reasoning, and robustness are all tested.
+- **"Didn't get it?"** reframes a question at the same difficulty.
+
+### 🧠 An LLM judge that actually judges you
+- After each session, an LLM reads your **cumulative** per-skill history (levels,
+  proficiency trend, prior verdicts) — never a single day — and returns
+  `advance` / `hold` / `downgrade` per skill with a one-line *why*.
+- **Confidence-gated:** a skill needs ~4 sessions at its level before it's even
+  eligible to advance. It defaults to *hold*. It moves you up only on a sustained
+  trend, and eases you back only if basics are clearly broken.
+- Weighs three signals: the MCQ (recognition), your written answer (depth), and the
+  follow-up MCQs (does your understanding hold up from other angles).
+
+### 📚 Learn, don't just test
+- **Learn this topic** — generates a focused study article on any concept.
+- **Visualize** — renders a Mermaid diagram of the idea.
+- **Must-read Papers** & **Company Articles** — LLM-curated with web search, with
+  **summarize-on-open** (a detailed study guide for any paper/post, cached).
+- **AI News** — a fresh daily digest for engineers.
+- **Library** — everything you save (links, topics, diagrams) in one place.
+
+### 🏋️ Practice (brain gym)
+- 60-second timed speed-MCQ rounds across memory, logic, spatial, pattern, mental
+  math, verbal, and attention. Score by speed + accuracy.
+
+### 💬 Coach
+- A chat mentor with memory — it rolls each day's conversation into a durable
+  summary so it carries continuity even after raw messages are pruned.
+
+### 👤 Multi-user & private by design
+- Anyone can sign up and get their **own** private Butler.
+- Every user has an **independent profile, progression, and LLM judge** — enforced
+  by Postgres Row-Level Security (`auth.uid() = user_id`) at the database layer.
+- Only reference content (news, paper summaries) is shared; all *learning* is
+  isolated per user.
+
+### 📱 PWA
+- Installable, offline-tolerant app shell, mobile-first design.
+
+---
+
+## Tech stack
+
+| Layer | Choice |
+|-------|--------|
+| Framework | **Next.js 15** (App Router, RSC, route handlers) |
+| Language | TypeScript |
+| Styling | Tailwind + a custom charcoal/lime design system |
+| Auth + DB | **Supabase** (Postgres, Auth, Row-Level Security) |
+| LLM | **OpenRouter** (model-agnostic; `:online` web search) |
+| Diagrams | Mermaid (lazy-loaded) |
+| Hosting | Vercel (+ daily cron) |
+
+**Model-agnostic by role.** `lib/models.ts` maps four roles — `judge`, `generate`,
+`web`, `coach` — to models via env vars, each falling back to `OPENROUTER_MODEL`,
+then to a sensible default (`google/gemini-2.5-flash`). Swap any role's model in one
+place without touching code.
+
+---
+
+## Getting started
+
+### Prerequisites
+- Node 20+
+- A [Supabase](https://supabase.com) project
+- An [OpenRouter](https://openrouter.ai) API key
+
+### 1. Install
 ```bash
 npm install
-npm run dev            # http://localhost:3000
 ```
-Sign in (password or magic link). First open auto-seeds your profile + builds your plan.
 
-> **Local dev note:** on macOS, if styles vanish or you get a 500 after restart, it's a
-> stale `.next` cache race — stop the server, `rm -rf .next`, restart, wait for "Ready".
-> Also, unsigned SWC binary: `xattr -c node_modules/@next/swc-darwin-arm64/*.node &&
-> codesign --force --sign - <that file>` if Gatekeeper blocks it.
+### 2. Configure environment
+Create `.env.local` (never commit it — it's gitignored):
 
-### 4. Deploy (Vercel)
-`vercel` → add all env vars in the dashboard → deploy. [`vercel.json`](vercel.json)
-schedules `/api/cron/daily` at 06:00 UTC (Vercel auto-sends the `CRON_SECRET` header).
-Add your Vercel URL to Supabase → Auth → Redirect URLs (`/auth/callback`).
-Open in Safari → Share → **Add to Home Screen**.
+```bash
+# Supabase
+NEXT_PUBLIC_SUPABASE_URL=https://YOUR-PROJECT.supabase.co
+NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=sb_publishable_...
+SUPABASE_SERVICE_ROLE_KEY=eyJ...            # server-only; bypasses RLS
+
+# OpenRouter
+OPENROUTER_API_KEY=sk-or-v1-...
+OPENROUTER_MODEL=google/gemini-2.5-flash    # default for all roles
+
+# Optional: override a specific role's model
+# OPENROUTER_MODEL_JUDGE=...
+# OPENROUTER_MODEL_GENERATE=...
+# OPENROUTER_MODEL_WEB=...
+# OPENROUTER_MODEL_COACH=...
+
+# Daily cron auth (any long random string)
+CRON_SECRET=your-random-secret
+```
+
+### 3. Set up the database
+In the Supabase SQL editor, run **`supabase/all_migrations.sql`** (the consolidated
+schema), or apply `schema.sql` then the numbered migrations `003`–`013` in order.
+
+### 4. Run
+```bash
+npm run dev        # http://localhost:3000
+```
+Sign up, and Butler seeds a baseline profile + curriculum on first run.
+
+> **macOS note:** if the dev server can't reach Supabase/OpenRouter with a TLS
+> `UNABLE_TO_GET_ISSUER_CERT_LOCALLY` error (common behind a corporate proxy), point
+> Node at your system CA bundle:
+> `NODE_EXTRA_CA_CERTS="$HOME/.your-ca.pem" npm run dev`.
 
 ---
 
-## Architecture notes
+## Deployment (Vercel)
 
-- **Security:** OpenRouter + service-role keys are server-only (API routes). RLS scopes
-  every user table to `auth.uid()`. Daily content is shared, read-only to clients.
-- **Speed:** client-side GET cache + prefetch (`lib/fetch-cache.ts`) for instant tab
-  switches; service worker caches immutable `_next` assets; streaming coach + articles;
-  GPU-only CSS animations (no animation library).
-- **Storage bounds:** chat/memory auto-pruned; per-skill history capped.
+1. Import the repo into Vercel.
+2. Add all env vars above to **Project → Settings → Environment Variables**
+   (`.env.local` is not deployed).
+3. The daily cron is defined in `vercel.json` — it runs `/api/cron/daily` at
+   **06:00 UTC** to build the day's news digest, brain-gym set, and each user's
+   learning journal. (Hobby tier allows one cron/day and caps functions at 60s.)
 
-## Roadmap
-- FSRS spaced-repetition scheduler (optimal review timing)
-- Push notifications (daily nudge)
-- Onboarding diagnostic assessment
+---
+
+## How progression works (the short version)
+
+```
+Daily session  ─►  you answer (MCQ + explanation + follow-ups)
+                        │
+                        ▼
+                 LLM judge reads your CUMULATIVE trend
+                        │
+        ┌───────────────┼───────────────┐
+     advance          hold           downgrade
+   (eligible +      (default —      (basics clearly
+    strong trend)   keep building)   broken)
+                        │
+                        ▼
+        skill_profile + curriculum update (per user)
+```
+
+It is **not** reinforcement learning in the ML sense — no model is trained. The
+adaptation lives in the data the LLM re-reads each session: your rolling per-skill
+history, proficiency (an EMA), sessions-at-level, and the judge's prior verdicts.
+
+---
+
+## Project layout
+
+```
+app/
+  api/
+    session/        generate · answer · followup · reframe · process (the judge)
+    plan/           adaptive curriculum generation
+    papers/ articles/ news/ summarize/   web-grounded content + summaries
+    brain-gym/      speed-round questions
+    cron/daily/     daily content + per-user rollups
+    ...
+  login/            auth (password + magic link)
+components/         Dashboard, Session, Profile, Coach, BrainGym, Library, Feed, ...
+lib/
+  models.ts         role → model mapping
+  session-gen.ts    question generation + parsing
+  openrouter.ts     thin OpenRouter client (streaming + :online)
+  supabase/         server / client / admin clients
+supabase/           schema.sql + numbered migrations + all_migrations.sql
+```
+
+---
+
+<div align="center">
+<sub>Built as a personal daily-growth companion. Charcoal + lime, mobile-first.</sub>
+</div>
