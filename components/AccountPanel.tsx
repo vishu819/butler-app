@@ -3,21 +3,15 @@
 import { useState } from "react";
 import { User, RefreshCw } from "lucide-react";
 import { createClient } from "@/lib/supabase/client";
-import { toast } from "./ui/Toast";
 import { invalidateAll } from "@/lib/fetch-cache";
+import Onboarding from "./Onboarding";
 
-// Account info + actions, including "Start fresh" (full reset + re-onboarding).
+// Account info + actions, including "Start fresh" (full reset + re-onboarding
+// via the same wizard as first-run, minus the name step).
 export default function AccountPanel({ name, email }: { name: string; email: string }) {
-  const [stage, setStage] = useState<"idle" | "confirm" | "intake" | "working">("idle");
+  const [stage, setStage] = useState<"idle" | "confirm" | "wizard">("idle");
   const [pw, setPw] = useState("");
   const [pwMsg, setPwMsg] = useState<string | null>(null);
-
-  // intake answers (all optional)
-  const [experience, setExperience] = useState("");
-  const [role, setRole] = useState("");
-  const [goal, setGoal] = useState("");
-  const [strong, setStrong] = useState("");
-  const [weak, setWeak] = useState("");
 
   async function changePassword(e: React.FormEvent) {
     e.preventDefault();
@@ -31,31 +25,17 @@ export default function AccountPanel({ name, email }: { name: string; email: str
     }
   }
 
-  async function startFresh() {
-    setStage("working");
-    try {
-      // 1) wipe all learning data (keep account)
-      await fetch("/api/reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ target: "everything", confirm: "RESET" }),
-      });
-      // 2) seed a starting profile from intake (optional answers)
-      await fetch("/api/onboard", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ answers: { experience, role, goal, strong, weak } }),
-      });
-      // 3) build a fresh curriculum (this is the slow step, ~15-20s)
-      await fetch("/api/plan", { method: "POST" });
-      // 4) clear all client caches so nothing stale is re-served
-      invalidateAll();
-      // Reload only AFTER everything above has completed — no timer race.
-      window.location.assign("/");
-    } catch {
-      toast("Couldn't start fresh — try again", "bad");
-      setStage("idle");
-    }
+  // Start fresh re-onboarding: the wizard (mode="reset") wipes data, re-asks the
+  // role/experience/goal questionnaire (no name), and rebuilds the plan.
+  if (stage === "wizard") {
+    return (
+      <Onboarding
+        initialName={name}
+        email={email}
+        mode="reset"
+        onDone={() => invalidateAll()}
+      />
+    );
   }
 
   return (
@@ -112,7 +92,7 @@ export default function AccountPanel({ name, email }: { name: string; email: str
         {stage === "confirm" && (
           <div className="mt-3 flex gap-2">
             <button
-              onClick={() => setStage("intake")}
+              onClick={() => setStage("wizard")}
               className="rounded-xl bg-red-600 px-3 py-2 text-sm font-semibold text-white"
             >
               Yes, wipe and rebuild
@@ -122,62 +102,7 @@ export default function AccountPanel({ name, email }: { name: string; email: str
             </button>
           </div>
         )}
-
-        {stage === "intake" && (
-          <div className="mt-3 space-y-2">
-            <p className="text-xs" style={{ color: "var(--muted)" }}>
-              A few optional questions to calibrate day one — skip any you like.
-            </p>
-            <Field label="Years of experience" value={experience} set={setExperience} placeholder="e.g. 6" />
-            <Field label="Current role" value={role} set={setRole} placeholder="e.g. Senior backend engineer" />
-            <Field label="Main goal" value={goal} set={setGoal} placeholder="e.g. become a staff architect" />
-            <Field label="Feel strong in" value={strong} set={setStrong} placeholder="e.g. API design, caching" />
-            <Field label="Want to improve" value={weak} set={setWeak} placeholder="e.g. distributed consensus" />
-            <div className="flex gap-2 pt-1">
-              <button onClick={startFresh} className="btn-primary flex-1 py-2">
-                Build my fresh profile
-              </button>
-              <button onClick={startFresh} className="btn-ghost text-sm">
-                Skip
-              </button>
-            </div>
-          </div>
-        )}
-
-        {stage === "working" && (
-          <div className="mt-3 flex items-center gap-2 text-sm" style={{ color: "var(--accent)" }}>
-            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-t-transparent" style={{ borderColor: "var(--accent-soft)", borderTopColor: "var(--accent)" }} />
-            Wiping and rebuilding your profile… this takes ~20 seconds.
-          </div>
-        )}
       </section>
     </div>
-  );
-}
-
-function Field({
-  label,
-  value,
-  set,
-  placeholder,
-}: {
-  label: string;
-  value: string;
-  set: (v: string) => void;
-  placeholder?: string;
-}) {
-  return (
-    <label className="block">
-      <span className="text-[11px]" style={{ color: "var(--muted)" }}>
-        {label}
-      </span>
-      <input
-        value={value}
-        onChange={(e) => set(e.target.value)}
-        placeholder={placeholder}
-        className="mt-0.5 w-full rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:bg-gray-950"
-        style={{ borderColor: "rgba(0,0,0,0.12)" }}
-      />
-    </label>
   );
 }

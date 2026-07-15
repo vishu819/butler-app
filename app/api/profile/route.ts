@@ -44,14 +44,15 @@ export async function GET() {
       : 0;
   const rating = Math.round((progress / 20) * 10) / 10; // 0-100 -> 0-5, 1 decimal
 
-  // Streak: consecutive days (up to today) with any quiz result.
-  const { data: qdates } = await supabase
-    .from("quiz_results")
-    .select("quiz_date")
+  // Streak: consecutive days (up to today) with a learning session. The daily
+  // session — not the retired quiz — is the learning loop now, so read from it.
+  const { data: sdates } = await supabase
+    .from("sessions")
+    .select("session_date")
     .eq("user_id", user.id)
-    .order("quiz_date", { ascending: false })
+    .order("session_date", { ascending: false })
     .limit(60);
-  const dateSet = new Set((qdates || []).map((r) => r.quiz_date));
+  const dateSet = new Set((sdates || []).map((r) => r.session_date));
   let streak = 0;
   const d = new Date();
   // Allow the streak to count from today or yesterday (grace for "not done yet today").
@@ -71,7 +72,7 @@ export async function GET() {
     .select("id", { count: "exact", head: true })
     .eq("user_id", user.id);
 
-  // Last 7 days activity (quiz taken that day) for a mini bar strip.
+  // Last 7 days activity (a session that day) for a mini bar strip.
   const week: { date: string; active: boolean }[] = [];
   const today0 = new Date();
   for (let i = 6; i >= 0; i--) {

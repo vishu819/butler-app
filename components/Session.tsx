@@ -258,12 +258,22 @@ export default function Session({
     if (oi === undefined || fuPicks[fi] !== undefined) return;
     const next = { ...fuPicks, [fi]: oi };
     setFuPicks(next);
+    setResponses((rs) => rs.map((r) => (r.qi === idx ? { ...r, fu_picks: next } : r)));
+    // The GET stripped correct/explanation from the follow-up MCQs (anti-peek),
+    // so grade server-side and merge the revealed answers back — otherwise a
+    // correct pick would render red with no explanation until a refetch.
     fetch("/api/session/followup", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ qi: idx, fu_picks: next }),
-    }).catch(() => {});
-    setResponses((rs) => rs.map((r) => (r.qi === idx ? { ...r, fu_picks: next } : r)));
+    })
+      .then((r) => r.json())
+      .then((j) => {
+        if (Array.isArray(j?.followup_mcqs) && j.followup_mcqs.length) {
+          setFuMcqs(j.followup_mcqs);
+        }
+      })
+      .catch(() => {});
   }
 
   async function reframe() {

@@ -142,18 +142,18 @@ export default function Goals() {
           value={title}
           onChange={(e) => setTitle(e.target.value)}
           placeholder="Add a goal…"
-          className="flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900"
+          className="min-w-0 flex-1 rounded-xl border border-gray-300 bg-white px-3 py-2 text-sm outline-none focus:border-brand-500 dark:border-gray-700 dark:bg-gray-900"
         />
         <select
           value={cadence}
           onChange={(e) => setCadence(e.target.value)}
-          className="rounded-xl border border-gray-300 bg-white px-2 text-sm dark:border-gray-700 dark:bg-gray-900"
+          className="shrink-0 rounded-xl border border-gray-300 bg-white px-2 text-sm dark:border-gray-700 dark:bg-gray-900"
         >
           <option value="daily">daily</option>
           <option value="weekly">weekly</option>
           <option value="monthly">monthly</option>
         </select>
-        <button className="btn-primary px-4">Add</button>
+        <button className="btn-primary shrink-0 px-4">Add</button>
       </form>
     </section>
   );

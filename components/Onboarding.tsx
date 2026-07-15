@@ -25,9 +25,21 @@ const EXPERIENCE = [
 
 type Step = "name" | "role" | "experience" | "goal" | "building";
 
-export default function Onboarding({ initialName, email }: { initialName: string; email: string }) {
+export default function Onboarding({
+  initialName,
+  email,
+  mode = "first-run",
+  onDone,
+}: {
+  initialName: string;
+  email: string;
+  // "first-run" = brand-new user (asks name). "reset" = Start fresh: wipe
+  // learning data first, skip the name step (account already has a name).
+  mode?: "first-run" | "reset";
+  onDone?: () => void;
+}) {
   const router = useRouter();
-  const [step, setStep] = useState<Step>("name");
+  const [step, setStep] = useState<Step>(mode === "reset" ? "role" : "name");
   const [name, setName] = useState(initialName);
   const [role, setRole] = useState<string>("");
   const [experience, setExperience] = useState<string>("");
@@ -48,6 +60,14 @@ export default function Onboarding({ initialName, email }: { initialName: string
     setStep("building");
     setErr(null);
     try {
+      // Start fresh: wipe all learning data first (account + name are kept).
+      if (mode === "reset") {
+        await fetch("/api/reset", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ target: "everything", confirm: "RESET" }),
+        });
+      }
       // Save intake + seed a role-calibrated profile + mark onboarded. This is
       // fast (~4s). We deliberately DON'T wait for the curriculum here — the
       // dashboard builds it in the background (via /api/init needsPlan) and
@@ -56,7 +76,8 @@ export default function Onboarding({ initialName, email }: { initialName: string
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name: name.trim(),
+          // In reset mode we keep the existing account name (don't overwrite).
+          ...(mode === "reset" ? {} : { name: name.trim() }),
           role,
           experience: EXPERIENCE.find((e) => e.key === experience)?.label || experience,
           goal: goal.trim(),
@@ -66,8 +87,15 @@ export default function Onboarding({ initialName, email }: { initialName: string
         const j = await res.json().catch(() => ({}));
         throw new Error(j.error || "Setup failed");
       }
-      // Straight into the dashboard (server now sees onboarded = true).
-      router.refresh();
+      if (onDone) onDone();
+      if (mode === "reset") {
+        // Full reload so the dashboard's /api/init rebuilds the plan in the
+        // background (a router.refresh from inside the app wouldn't re-run it).
+        window.location.assign("/");
+      } else {
+        // Straight into the dashboard (server now sees onboarded = true).
+        router.refresh();
+      }
     } catch (e: any) {
       setErr(e?.message || "Something went wrong. Please try again.");
       setStep("goal");
@@ -155,9 +183,11 @@ export default function Onboarding({ initialName, email }: { initialName: string
             ))}
           </div>
           <div className="flex gap-2">
-            <button onClick={() => setStep("name")} className="btn-ghost flex items-center gap-1 !px-3">
-              <ArrowLeft size={16} />
-            </button>
+            {mode !== "reset" && (
+              <button onClick={() => setStep("name")} className="btn-ghost flex items-center gap-1 !px-3">
+                <ArrowLeft size={16} />
+              </button>
+            )}
             <button
               disabled={!role}
               onClick={() => setStep("experience")}

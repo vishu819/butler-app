@@ -57,5 +57,18 @@ export async function POST(req: Request) {
   next.push(updated);
   await supabase.from("sessions").update({ responses: next }).eq("id", session.id);
 
-  return NextResponse.json({ ok: true, fu_correct: fuCorrect, fu_total: fuTotal });
+  // Return the graded follow-up MCQs (correct index + explanation) so the client
+  // can reveal ✓/✗ + why immediately — without a refetch. The main question is
+  // already answered here, so revealing the follow-up answers isn't a peek.
+  return NextResponse.json({
+    ok: true,
+    fu_correct: fuCorrect,
+    fu_total: fuTotal,
+    followup_mcqs: fuList.map((m: any) => ({
+      q: m.q,
+      options: m.options,
+      correct: m.correct,
+      explanation: m.explanation,
+    })),
+  });
 }
