@@ -112,34 +112,41 @@ export async function GET(req: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // ---- Summarize yesterday's chat into a durable daily_summary memory ----
-  try {
-    results.summary = await summarizeYesterday(admin);
-  } catch (e: any) {
-    results.summary = `error: ${e.message}`;
+  // ---- Per-user rollups: run for EVERY user (multi-user) ----
+  // Each user gets their own daily chat-memory summary + learning digest.
+  const { data: profiles } = await admin.from("profiles").select("id");
+  const userIds = (profiles || []).map((p) => p.id).filter(Boolean);
+  let summaryOk = 0;
+  let learningOk = 0;
+  for (const userId of userIds) {
+    try {
+      if ((await summarizeYesterday(admin, userId)) === "ok") summaryOk++;
+    } catch {
+      /* skip this user, keep going */
+    }
+    try {
+      if ((await summarizeLearning(admin, userId)) === "ok") learningOk++;
+    } catch {
+      /* skip this user, keep going */
+    }
   }
-
-  // ---- Daily learning digest: what the user learned from yesterday's quiz ----
-  try {
-    results.learning = await summarizeLearning(admin);
-  } catch (e: any) {
-    results.learning = `error: ${e.message}`;
-  }
+  results.users = String(userIds.length);
+  results.summary = `${summaryOk}/${userIds.length}`;
+  results.learning = `${learningOk}/${userIds.length}`;
 
   return NextResponse.json({ date: today, results });
 }
 
 // Review yesterday's quiz (questions + right/wrong) and write "what you learned today".
 async function summarizeLearning(
-  admin: ReturnType<typeof createAdminClient>
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string
 ): Promise<string> {
   const now = new Date();
   const y = new Date(now);
   y.setUTCDate(y.getUTCDate() - 1);
   const dayKey = y.toISOString().slice(0, 10);
 
-  const { data: prof } = await admin.from("profiles").select("id").limit(1).maybeSingle();
-  const userId = prof?.id;
   if (!userId) return "skip: no user";
 
   // Idempotent — already summarized this day?
@@ -204,9 +211,10 @@ async function summarizeLearning(
 
 // Roll up the previous day's coach conversation into one long-term memory row,
 // so the coach carries continuity across days even after raw messages are pruned.
-// Single-user app: operates on the one profile's user id.
+// Runs per-user (called in a loop over all profiles).
 async function summarizeYesterday(
-  admin: ReturnType<typeof createAdminClient>
+  admin: ReturnType<typeof createAdminClient>,
+  userId: string
 ): Promise<string> {
   // Yesterday's date range (UTC).
   const now = new Date();
@@ -217,9 +225,6 @@ async function summarizeYesterday(
   end.setUTCHours(23, 59, 59, 999);
   const dayKey = start.toISOString().slice(0, 10);
 
-  // Single-user: pick the (one) profile.
-  const { data: prof } = await admin.from("profiles").select("id").limit(1).maybeSingle();
-  const userId = prof?.id;
   if (!userId) return "skip: no user";
 
   // Already summarized this day? (idempotent)

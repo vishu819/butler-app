@@ -189,3 +189,20 @@ do $$ begin
   create policy "read feed_summaries" on feed_summaries for select
     using (auth.role() = 'authenticated');
 exception when duplicate_object then null; end $$;
+
+-- ---------- 013: multi-user profile name default ----------
+create or replace function public.handle_new_user()
+returns trigger language plpgsql security definer set search_path = public as $$
+begin
+  insert into public.profiles (id, name)
+  values (
+    new.id,
+    coalesce(
+      nullif(new.raw_user_meta_data->>'name', ''),
+      nullif(split_part(new.email, '@', 1), ''),
+      'there'
+    )
+  );
+  return new;
+end;
+$$;

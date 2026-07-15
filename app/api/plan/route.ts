@@ -130,7 +130,7 @@ Return JSON:
     return NextResponse.json({ error: e.message || "plan generation failed" }, { status: 502 });
   }
 
-  // Replace the plan (fresh generation). Keep it simple for single-user.
+  // Replace this user's plan (fresh generation). Scoped to user_id.
   await supabase.from("curriculum").delete().eq("user_id", user.id);
   const { error } = await supabase.from("curriculum").insert(plan);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

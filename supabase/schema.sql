@@ -103,7 +103,16 @@ create policy "read daily" on daily_content for select using (auth.role() = 'aut
 create or replace function public.handle_new_user()
 returns trigger language plpgsql security definer set search_path = public as $$
 begin
-  insert into public.profiles (id, name) values (new.id, coalesce(new.raw_user_meta_data->>'name', 'Vishal'));
+  -- Name from signup metadata, else the email's local part, else a neutral default.
+  insert into public.profiles (id, name)
+  values (
+    new.id,
+    coalesce(
+      nullif(new.raw_user_meta_data->>'name', ''),
+      nullif(split_part(new.email, '@', 1), ''),
+      'there'
+    )
+  );
   return new;
 end;
 $$;
