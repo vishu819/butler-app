@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { siteUrl } from "@/lib/site-url";
 
 type Mode = "signin" | "signup" | "magic";
 
@@ -21,15 +22,22 @@ export default function LoginPage() {
     const supabase = createClient();
 
     try {
+      const redirect = `${siteUrl()}/auth/callback`;
       if (mode === "magic") {
         const { error } = await supabase.auth.signInWithOtp({
           email,
-          options: { emailRedirectTo: `${window.location.origin}/auth/callback` },
+          options: { emailRedirectTo: redirect },
         });
         if (error) throw error;
         setMsg({ kind: "ok", text: `Magic link sent to ${email}. Check your inbox.` });
       } else if (mode === "signup") {
-        const { error } = await supabase.auth.signUp({ email, password });
+        // emailRedirectTo makes the confirmation email link back to THIS app
+        // (the deployed URL), not the Supabase-dashboard Site URL default.
+        const { error } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { emailRedirectTo: redirect },
+        });
         if (error) throw error;
         // If email confirmation is disabled, a session is created immediately.
         const { data } = await supabase.auth.getSession();

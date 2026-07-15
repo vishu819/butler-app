@@ -9,8 +9,10 @@ export async function middleware(request: NextRequest) {
   // removes a network hop from EVERY /api/* request — the main load-time cost.
   if (path.startsWith("/api/")) return NextResponse.next();
 
-  // The login page is public.
-  if (path.startsWith("/login")) return NextResponse.next();
+  // The login page is public. So are the auth callback/signout routes — the
+  // callback must run its code/token exchange BEFORE any session cookie exists,
+  // so it can't be gated behind the "signed in?" check below.
+  if (path.startsWith("/login") || path.startsWith("/auth/")) return NextResponse.next();
 
   let response = NextResponse.next({ request });
 
