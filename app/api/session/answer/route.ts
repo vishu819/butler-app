@@ -42,7 +42,7 @@ export async function POST(req: Request) {
   } catch {
     return NextResponse.json({ error: "invalid body" }, { status: 400 });
   }
-  const { qi, chosen, followup } = body;
+  const { qi, chosen, followup, fu_picks } = body;
   const today = new Date().toISOString().slice(0, 10);
 
   const { data: session } = await supabase
@@ -58,6 +58,17 @@ export async function POST(req: Request) {
   if (!q) return NextResponse.json({ error: "bad question index" }, { status: 400 });
 
   const mcqCorrect = chosen === q.correct;
+
+  // Grade the follow-up MCQs locally from the picks the client sends.
+  // fu_picks is a map { followupIndex: chosenOptionIndex }.
+  const fuList: any[] = Array.isArray(q.followup_mcqs) ? q.followup_mcqs : [];
+  const fuPicks: Record<number, number> =
+    fu_picks && typeof fu_picks === "object" ? fu_picks : {};
+  const fuTotal = fuList.length;
+  let fuCorrect = 0;
+  for (let i = 0; i < fuList.length; i++) {
+    if (fuPicks[i] !== undefined && fuPicks[i] === fuList[i].correct) fuCorrect++;
+  }
 
   // LLM judges the typed follow-up answer.
   let judge = { score: 0, feedback: "" };
@@ -109,6 +120,9 @@ Return JSON: {"score": <0-100>, "feedback": "1-2 sentences"}`,
     followup_score: judge.score,
     feedback: judge.feedback,
     graded, // false = grading fell back; client can offer a retry
+    fu_picks: fuPicks, // { followupIndex: chosenOption } — persisted so it survives navigation
+    fu_correct: fuCorrect, // how many follow-up MCQs were right
+    fu_total: fuTotal,
   };
 
   // Merge into responses (replace if re-answered).

@@ -55,9 +55,11 @@ export default function Session() {
   const [reveal, setReveal] = useState<{ correct: number; explanation: string } | null>(null);
   const [judge, setJudge] = useState<{ score: number; feedback: string; graded?: boolean } | null>(null);
   const [regrading, setRegrading] = useState(false);
-  // Follow-up MCQs: the revealed answers + which option the user picked for each.
+  // Follow-up MCQs: the revealed answers, plus tentative (draft) picks and the
+  // confirmed picks. Draft = changeable; confirmed (fuPicks) = locked + graded.
   const [fuMcqs, setFuMcqs] = useState<FUMCQ[]>([]);
   const [fuPicks, setFuPicks] = useState<Record<number, number>>({});
+  const [fuDraft, setFuDraft] = useState<Record<number, number>>({});
 
   function load() {
     setLoading(true);
@@ -97,8 +99,8 @@ export default function Session() {
         const msg = j.leveled?.length
           ? `Leveled up: ${j.leveled.join(", ")} 🎉`
           : j.downgraded?.length
-            ? `Eased back: ${j.downgraded.join(", ")} — let's solidify basics`
-            : "Progress saved";
+          ? `Eased back: ${j.downgraded.join(", ")} — let's solidify basics`
+          : "Progress saved";
         toast(msg, j.downgraded?.length ? "info" : "good");
       } else {
         setErr(j.error || "Couldn't save progress");
@@ -121,6 +123,7 @@ export default function Session() {
       // Restore revealed follow-up MCQs (present once the question is answered).
       setFuMcqs(questions[idx]?.followup_mcqs || []);
       setFuPicks((r as any).fu_picks || {});
+      setFuDraft((r as any).fu_picks || {}); // confirmed picks are their own draft
       setPhase("reviewed");
     } else {
       setChosen(null);
@@ -129,6 +132,7 @@ export default function Session() {
       setReveal(null);
       setFuMcqs([]);
       setFuPicks({});
+      setFuDraft({});
       setPhase("mcq");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -165,6 +169,7 @@ export default function Session() {
         setJudge({ score: j.response.followup_score, feedback: j.response.feedback, graded: j.response.graded !== false });
         setFuMcqs(j.reveal.followup_mcqs || []);
         setFuPicks({});
+        setFuDraft({});
         setResponses((rs) => [...rs.filter((r) => r.qi !== idx), j.response]);
         setPhase("reviewed");
         if (j.complete) {
@@ -206,6 +211,35 @@ export default function Session() {
     } finally {
       setRegrading(false);
     }
+  }
+
+  // Tentatively select a follow-up option (changeable until confirmed). Tapping
+  // the same option again clears it — lets you undo an accidental pick.
+  function draftFollowup(fi: number, oi: number) {
+    if (fuPicks[fi] !== undefined) return; // already locked
+    setFuDraft((d) => {
+      if (d[fi] === oi) {
+        const next = { ...d };
+        delete next[fi]; // tap same option again to clear an accidental pick
+        return next;
+      }
+      return { ...d, [fi]: oi };
+    });
+  }
+
+  // Confirm a follow-up: lock it in, grade it, and persist so it survives
+  // navigation and feeds the reinforcement judge. Fire-and-forget on the network.
+  function confirmFollowup(fi: number) {
+    const oi = fuDraft[fi];
+    if (oi === undefined || fuPicks[fi] !== undefined) return;
+    const next = { ...fuPicks, [fi]: oi };
+    setFuPicks(next);
+    fetch("/api/session/followup", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ qi: idx, fu_picks: next }),
+    }).catch(() => {});
+    setResponses((rs) => rs.map((r) => (r.qi === idx ? { ...r, fu_picks: next } : r)));
   }
 
   async function reframe() {
@@ -347,8 +381,8 @@ export default function Session() {
                           v.verdict === "advance"
                             ? { background: "var(--good-soft)", color: "var(--good)" }
                             : v.verdict === "downgrade"
-                              ? { background: "var(--bad-soft)", color: "var(--bad)" }
-                              : { background: "var(--warn-soft)", color: "var(--warn)" }
+                            ? { background: "var(--bad-soft)", color: "var(--bad)" }
+                            : { background: "var(--warn-soft)", color: "var(--warn)" }
                         }
                       >
                         {v.skill}: {v.verdict}
@@ -401,7 +435,8 @@ export default function Session() {
               <button
                 key={oi}
                 disabled={phase !== "mcq"}
-                onClick={() => setChosen(oi)}
+                // Tap again to deselect an accidental pick. Locks after Continue.
+                onClick={() => setChosen((c) => (c === oi ? null : oi))}
                 className="flex w-full items-start gap-2 rounded-xl border px-3 py-2.5 text-left text-sm transition-all active:scale-[.99]"
                 style={style}
               >
@@ -505,24 +540,26 @@ export default function Session() {
               <div className="space-y-2.5 pt-1">
                 <p className="section-label">Go deeper · {Object.keys(fuPicks).length}/{fuMcqs.length}</p>
                 {fuMcqs.map((fm, fi) => {
-                  const picked = fuPicks[fi];
-                  const answered = picked !== undefined;
+                  const confirmed = fuPicks[fi];
+                  const locked = confirmed !== undefined;
+                  const draft = fuDraft[fi];
                   return (
                     <div key={fi} className="rounded-xl border p-3" style={{ borderColor: "rgba(0,0,0,0.07)" }}>
                       <p className="mb-2 text-sm font-medium">{fm.q}</p>
                       <div className="space-y-1.5">
                         {fm.options.map((opt, oi) => {
-                          const isPick = picked === oi;
-                          const isCorrect = answered && oi === fm.correct;
-                          const isWrongPick = answered && isPick && oi !== fm.correct;
+                          const isDraft = !locked && draft === oi;
+                          const isCorrect = locked && oi === fm.correct;
+                          const isWrongPick = locked && confirmed === oi && oi !== fm.correct;
                           let style: React.CSSProperties = { borderColor: "rgba(0,0,0,0.1)" };
-                          if (isCorrect) style = { borderColor: "var(--good)", background: "var(--good-soft)" };
+                          if (isDraft) style = { borderColor: "var(--accent)", background: "var(--accent-soft)" };
+                          else if (isCorrect) style = { borderColor: "var(--good)", background: "var(--good-soft)" };
                           else if (isWrongPick) style = { borderColor: "var(--bad)", background: "var(--bad-soft)" };
                           return (
                             <button
                               key={oi}
-                              disabled={answered}
-                              onClick={() => setFuPicks((p) => ({ ...p, [fi]: oi }))}
+                              disabled={locked}
+                              onClick={() => draftFollowup(fi, oi)}
                               className="flex w-full items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition-all active:scale-[.99] disabled:cursor-default"
                               style={style}
                             >
@@ -533,7 +570,16 @@ export default function Session() {
                           );
                         })}
                       </div>
-                      {answered && fm.explanation && (
+                      {/* Check button: appears once a tentative option is picked, before locking */}
+                      {!locked && draft !== undefined && (
+                        <button
+                          onClick={() => confirmFollowup(fi)}
+                          className="btn-primary mt-2 px-4 py-1.5 text-xs"
+                        >
+                          Check
+                        </button>
+                      )}
+                      {locked && fm.explanation && (
                         <p className="mt-2 text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
                           {fm.explanation}
                         </p>
