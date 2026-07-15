@@ -7,6 +7,9 @@ create table if not exists profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   name text,
   timezone text default 'UTC',
+  target_role text,                           -- architect | backend | frontend | data | em | generalist
+  experience text,                            -- free-text intake, e.g. "5 yrs, mostly backend"
+  onboarded boolean not null default false,   -- has the learner finished the intro wizard?
   prefs jsonb not null default '{}'::jsonb,   -- coaching style, focus areas, etc.
   created_at timestamptz not null default now()
 );

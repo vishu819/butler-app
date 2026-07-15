@@ -1,11 +1,15 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { pickFocusSkills, generateSession } from "@/lib/session-gen";
+import { roleFor, skillKeysForRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
 export const maxDuration = 120; // web-grounded generation (search + large gen) can exceed 60s
 
-const PER_SKILL = 2; // 2 each × 3 focus sectors + 2 new concept ≈ 8 per day
+// Shorter daily session: 1 reinforcement question on each of 3 focus skills + 1
+// new concept ≈ 4 questions total.
+const PER_SKILL = 1;
+const FOCUS_COUNT = 3;
 
 // GET -> today's session (without the correct answers / explanations pre-reveal).
 export async function GET() {
@@ -67,10 +71,21 @@ export async function POST() {
     .maybeSingle();
   if (existing) return NextResponse.json({ status: "exists" });
 
-  const { data: skillRows } = await supabase
+  // Target role decides which skills this learner trains + how deep they go.
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("target_role")
+    .eq("id", user.id)
+    .maybeSingle();
+  const role = roleFor(profileRow?.target_role);
+  const roleSkillKeys = skillKeysForRole(profileRow?.target_role);
+
+  const { data: allSkillRows } = await supabase
     .from("skill_profile")
     .select("skill, level, proficiency, seen")
     .eq("user_id", user.id);
+  // Only consider skills that belong to the learner's role.
+  const skillRows = (allSkillRows || []).filter((r) => roleSkillKeys.includes(r.skill));
 
   // Broad coverage: what did recent sessions already cover? Deprioritize those
   // so all competencies cycle over ~a week, while still weighting toward weak areas.
@@ -82,23 +97,37 @@ export async function POST() {
     .limit(3);
   const recentlyCovered = (recentSessions || []).flatMap((s) => s.focus_skills || []);
 
-  // ~3 focus skills × 2 questions + 2 on a new concept ≈ 8 questions.
-  const focus = pickFocusSkills(skillRows || [], 3, recentlyCovered);
+  // Pick focus skills from THIS role's set only, clamped to the role's ceiling.
+  const focus = pickFocusSkills(skillRows, FOCUS_COUNT, recentlyCovered, roleSkillKeys).map(
+    (f) => ({ ...f, level: Math.min(f.level, role.ceiling) })
+  );
 
-  // Pick the next NEW concept: an unmastered curriculum topic not yet introduced.
+  // The learning PATH drives the session. Pull the unmastered curriculum tail:
+  //  - `active` topics = what they're currently working through → reinforce these
+  //  - the first `planned` topic = the next NEW concept to introduce
   const { data: topics } = await supabase
     .from("curriculum")
-    .select("topic, skill, status, position")
+    .select("topic, skill, status, rationale, position")
     .eq("user_id", user.id)
     .neq("status", "mastered")
     .order("position")
-    .limit(1);
-  const newTopic = topics && topics[0] ? { topic: topics[0].topic, skill: topics[0].skill } : null;
+    .limit(8);
+  const active = (topics || []).filter((t) => t.status === "active");
+  const firstPlanned = (topics || []).find((t) => t.status === "planned");
+  // Anchor reinforcement to the 2-3 active path topics (fallback: none → pure weakness).
+  const pathTopics = active.slice(0, 3).map((t) => ({
+    topic: t.topic,
+    skill: t.skill as string,
+    rationale: (t.rationale as string) || "",
+  }));
+  const newTopic = firstPlanned
+    ? { topic: firstPlanned.topic, skill: firstPlanned.skill }
+    : null;
 
   try {
     // The generation call is web-grounded (:online) — it pulls real incidents
     // itself, so no separate web-context pre-fetch is needed.
-    const questions = await generateSession(focus, PER_SKILL, undefined, newTopic);
+    const questions = await generateSession(focus, PER_SKILL, undefined, newTopic, pathTopics, role.framing);
     if (questions.length === 0) {
       console.error("[session] generation returned 0 questions (focus:", focus.map((f) => f.key).join(","), ")");
       return NextResponse.json({ error: "Couldn't build a session. Try again." }, { status: 502 });

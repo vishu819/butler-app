@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
-import { SKILLS } from "@/lib/skills";
+import { SKILL_LABEL } from "@/lib/skills";
+import { skillKeysForRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
-// GET -> the user's full skill map (every skill, with defaults for untested ones).
+// GET -> the user's skill map for THEIR role (every role skill, defaults for
+// untested ones).
 export async function GET() {
   const supabase = await createClient();
   const {
@@ -12,17 +14,21 @@ export async function GET() {
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  const { data } = await supabase
-    .from("skill_profile")
-    .select("skill, level, proficiency, seen, correct")
-    .eq("user_id", user.id);
+  const [{ data }, { data: profileRow }] = await Promise.all([
+    supabase
+      .from("skill_profile")
+      .select("skill, level, proficiency, seen, correct")
+      .eq("user_id", user.id),
+    supabase.from("profiles").select("target_role").eq("id", user.id).maybeSingle(),
+  ]);
   const rows = new Map((data || []).map((r) => [r.skill, r]));
+  const roleSkillKeys = skillKeysForRole(profileRow?.target_role);
 
-  const skills = SKILLS.map((s) => {
-    const r = rows.get(s.key);
+  const skills = roleSkillKeys.map((key) => {
+    const r = rows.get(key);
     return {
-      key: s.key,
-      label: s.label,
+      key,
+      label: SKILL_LABEL[key] || key,
       level: r?.level ?? 1,
       proficiency: r?.proficiency ?? 0,
       seen: r?.seen ?? 0,

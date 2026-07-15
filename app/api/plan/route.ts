@@ -2,7 +2,9 @@ import { NextResponse } from "next/server";
 import { createClient } from "@/lib/supabase/server";
 import { chat } from "@/lib/openrouter";
 import { modelFor } from "@/lib/models";
-import { SKILLS, SKILL_KEYS } from "@/lib/skills";
+import { SKILL_LABEL } from "@/lib/skills";
+import { evolvePlan } from "@/lib/plan-evolve";
+import { roleFor, skillKeysForRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -53,25 +55,73 @@ export async function GET() {
   return NextResponse.json({ plan: planRes.data || [], profile: profRes.data || null });
 }
 
-// POST -> (re)generate the adaptive curriculum from the learner profile + skills.
-export async function POST() {
+// POST -> refresh or rebuild the adaptive curriculum.
+//   body {mode:"refresh"} (DEFAULT) — non-destructive: keep active/mastered
+//     progress, re-plan only the not-yet-started tail against current skills
+//     (delegates to evolvePlan). This is the manual counterpart to the automatic
+//     post-session evolution.
+//   body {mode:"rebuild"} — destructive: design a brand-new curriculum from
+//     scratch and replace everything (progress reset). "Start over".
+// With no plan yet, either mode builds from scratch.
+export async function POST(req: Request) {
   const supabase = await createClient();
   const {
     data: { user },
   } = await supabase.auth.getUser();
   if (!user) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
 
-  // Gather context: skill profile + narrative + prior mastery.
-  const [skillRes, profRes, priorRes] = await Promise.all([
+  let mode: "refresh" | "rebuild" = "refresh";
+  try {
+    const body = await req.json();
+    if (body?.mode === "rebuild") mode = "rebuild";
+  } catch {
+    /* no body → default refresh */
+  }
+
+  // Does a plan already exist? Refresh only makes sense when it does.
+  const { data: hasPlan } = await supabase
+    .from("curriculum")
+    .select("id")
+    .eq("user_id", user.id)
+    .limit(1);
+
+  // ---- Non-destructive refresh: evolve the planned tail in place ----
+  if (mode === "refresh" && hasPlan && hasPlan.length > 0) {
+    const { data: profile } = await supabase
+      .from("learner_profile")
+      .select("narrative, strengths, gaps, misconceptions")
+      .eq("user_id", user.id)
+      .maybeSingle();
+    const result = await evolvePlan(supabase, user.id, {
+      narrative: profile?.narrative,
+      strengths: profile?.strengths || [],
+      gaps: profile?.gaps || [],
+      misconceptions: profile?.misconceptions || [],
+    });
+    if (result.status === "error") {
+      return NextResponse.json({ error: result.reason || "refresh failed" }, { status: 502 });
+    }
+    return NextResponse.json({ status: "refreshed", result });
+  }
+
+  // ---- Rebuild from scratch (or first-ever build) ----
+  // Gather context: role + skill profile + narrative + prior mastery.
+  const [profileRes, skillRes, profRes, priorRes] = await Promise.all([
+    supabase.from("profiles").select("target_role").eq("id", user.id).maybeSingle(),
     supabase.from("skill_profile").select("skill, level, proficiency, seen").eq("user_id", user.id),
     supabase.from("learner_profile").select("narrative, strengths, gaps").eq("user_id", user.id).maybeSingle(),
     supabase.from("curriculum").select("topic, status, mastery").eq("user_id", user.id),
   ]);
 
-  const skillLines = SKILLS.map((s) => {
-    const r = (skillRes.data || []).find((x) => x.skill === s.key);
-    return `- ${s.label}: ${r ? `${r.proficiency}/100, level ${r.level}, ${r.seen} seen` : "not assessed"}`;
-  }).join("\n");
+  const role = roleFor(profileRes.data?.target_role);
+  const roleSkillKeys = skillKeysForRole(profileRes.data?.target_role);
+
+  const skillLines = roleSkillKeys
+    .map((k) => {
+      const r = (skillRes.data || []).find((x) => x.skill === k);
+      return `- ${SKILL_LABEL[k] || k}: ${r ? `${r.proficiency}/100, level ${r.level}, ${r.seen} seen` : "not assessed"}`;
+    })
+    .join("\n");
   const prof = profRes.data;
   const priorTopics = (priorRes.data || [])
     .map((p) => `${p.topic} (${p.status}, ${p.mastery}%)`)
@@ -83,21 +133,22 @@ export async function POST() {
       [
         {
           role: "system",
-          content:
-            "You are Butler, a master software-architecture mentor designing a personalized learning curriculum. You build an ORDERED plan of modules, each broken into specific topics, that takes the learner from where they are to strong architect-level mastery. Prioritize the learner's gaps and the tradeoff-heavy topics engineers most often fail (distributed-systems tradeoffs, data modeling decisions, consistency, real-world scalability). Each topic must be SPECIFIC and practical, not generic. Return JSON only.",
+          content: `You are Butler, a master engineering mentor designing a personalized learning curriculum. ${role.framing} You build an ORDERED plan of modules, each broken into specific topics, that takes the learner from where they are to strong mastery for THIS role (level ceiling ${role.ceiling}/5). Prioritize the learner's gaps and the tradeoff-heavy, failure-mode topics people in this role most often get wrong. Every topic must be SPECIFIC and practical, not generic, and must fit the target role — do not drift into unrelated domains. Return JSON only.`,
         },
         {
           role: "user",
-          content: `Learner's skill assessment:
+          content: `Target role: ${role.label}.
+
+Learner's skill assessment (only these role-relevant skills):
 ${skillLines}
 
-${prof?.narrative ? `What we know about them: ${prof.narrative}\nStrengths: ${(prof.strengths || []).join(", ")}\nGaps: ${(prof.gaps || []).join(", ")}` : "No profile yet — assume a mid-level engineer aiming to become an architect."}
+${prof?.narrative ? `What we know about them: ${prof.narrative}\nStrengths: ${(prof.strengths || []).join(", ")}\nGaps: ${(prof.gaps || []).join(", ")}` : `No profile yet — assume a mid-level engineer aiming for: ${role.label}.`}
 
 ${priorTopics ? `Topics already in their plan (keep mastered ones, evolve the rest): ${priorTopics}` : ""}
 
 Design a curriculum of 4-6 modules, each with 3-5 specific topics. Order topics so foundations come before advanced tradeoffs, but front-load their weakest skills.
 
-For each topic, "skill" MUST be exactly one of these keys (copy verbatim, do not invent): ${SKILL_KEYS.join(", ")}.
+For each topic, "skill" MUST be exactly one of these keys (copy verbatim, do not invent): ${roleSkillKeys.join(", ")}.
 
 Return JSON:
 {"modules":[{"module":"module name","topics":[{"topic":"specific topic","skill":"one_of_the_keys_above","rationale":"one line: why this, why now"}]}]}`,
@@ -117,7 +168,7 @@ Return JSON:
           user_id: user.id,
           module: m.module || "Module",
           topic: t.topic,
-          skill: SKILL_KEYS.includes(t.skill) ? t.skill : null,
+          skill: roleSkillKeys.includes(t.skill) ? t.skill : null,
           rationale: t.rationale || null,
           position: pos++,
           status: "planned",

@@ -35,15 +35,27 @@ export default function Plan() {
     load();
   }, []);
 
-  async function generate() {
+  // mode "refresh" (default) re-plans the upcoming tail from current progress —
+  // keeps what you've mastered. mode "rebuild" starts the whole path over.
+  async function generate(mode: "refresh" | "rebuild" = "refresh") {
+    if (mode === "rebuild" && plan.length) {
+      const ok = window.confirm(
+        "Start over? This discards your current path and progress and designs a brand-new one from scratch. Your skill levels are kept."
+      );
+      if (!ok) return;
+    }
     setGenerating(true);
     setErr(null);
     try {
-      const res = await fetch("/api/plan", { method: "POST" });
+      const res = await fetch("/api/plan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mode }),
+      });
       const text = await res.text();
       const j = text ? JSON.parse(text) : {};
       if (res.ok) load();
-      else setErr(j.error || `Couldn't build plan (${res.status}).`);
+      else setErr(j.error || `Couldn't update plan (${res.status}).`);
     } catch {
       setErr("Something went wrong. Please try again.");
     } finally {
@@ -74,14 +86,28 @@ export default function Plan() {
             An adaptive plan toward architect mastery
           </p>
         </div>
-        <button
-          onClick={generate}
-          disabled={generating}
-          className="btn-ghost flex items-center gap-1 !px-2.5 !py-1.5 text-xs"
-        >
-          <RotateCw size={13} className={generating ? "animate-spin" : ""} />
-          {plan.length ? "Rebuild" : "Build"}
-        </button>
+        {plan.length > 0 && (
+          <div className="flex items-center gap-1.5">
+            <button
+              onClick={() => generate("refresh")}
+              disabled={generating}
+              className="btn-ghost flex items-center gap-1 !px-2.5 !py-1.5 text-xs"
+              title="Re-plan the upcoming topics based on your current progress and skills. Keeps what you've mastered."
+            >
+              <RotateCw size={13} className={generating ? "animate-spin" : ""} />
+              Refresh
+            </button>
+            <button
+              onClick={() => generate("rebuild")}
+              disabled={generating}
+              className="btn-ghost !px-2.5 !py-1.5 text-xs"
+              style={{ color: "var(--muted)" }}
+              title="Discard this path and design a brand-new one from scratch."
+            >
+              Start over
+            </button>
+          </div>
+        )}
       </div>
 
       {narrative && (
@@ -104,7 +130,7 @@ export default function Plan() {
             No plan yet. Butler will design a personalized curriculum based on your skill
             assessment and how you learn.
           </p>
-          <button onClick={generate} disabled={generating} className="btn-primary">
+          <button onClick={() => generate("rebuild")} disabled={generating} className="btn-primary">
             {generating ? "Designing your plan…" : "Build my learning path"}
           </button>
           {err && <p className="mt-2 text-xs text-red-500">{err}</p>}

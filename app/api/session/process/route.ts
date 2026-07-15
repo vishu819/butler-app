@@ -3,9 +3,13 @@ import { createClient } from "@/lib/supabase/server";
 import { chat } from "@/lib/openrouter";
 import { modelFor } from "@/lib/models";
 import { SKILL_LABEL } from "@/lib/skills";
+import { evolvePlan } from "@/lib/plan-evolve";
+import { roleFor } from "@/lib/roles";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Judge (~up to 50s) + optional auto-evolve of the plan (~up to 30s) can run
+// back-to-back. 120s keeps both comfortably within the function budget.
+export const maxDuration = 120;
 
 // POST -> process today's completed session with the LLM: update learner profile,
 // per-skill proficiency (with slow-ramp levels), and curriculum mastery.
@@ -53,6 +57,14 @@ export async function POST() {
     .select("narrative, strengths, gaps, misconceptions")
     .eq("user_id", user.id)
     .maybeSingle();
+
+  // Target role sets the level ceiling (an IC role tops out below staff/architect).
+  const { data: profileRow } = await supabase
+    .from("profiles")
+    .select("target_role")
+    .eq("id", user.id)
+    .maybeSingle();
+  const role = roleFor(profileRow?.target_role);
 
   // Per-skill cumulative record — the LLM judges on the TREND, not just today.
   const focusSkills = (session.focus_skills || []) as string[];
@@ -166,7 +178,7 @@ For EACH skill practiced, decide a verdict. Advance ONLY if the skill is ELIGIBL
       const eligible = atLevel >= MIN_SESSIONS_TO_MOVE;
       let effectiveVerdict = p.verdict;
       let moved = false;
-      if (p.verdict === "advance" && eligible && level < 5) {
+      if (p.verdict === "advance" && eligible && level < role.ceiling) {
         level += 1;
         moved = true;
       } else if (p.verdict === "downgrade" && level > 1) {
@@ -210,6 +222,7 @@ For EACH skill practiced, decide a verdict. Advance ONLY if the skill is ELIGIBL
   }
 
   // ---- Advance curriculum: mark strongly-understood topics as mastered ----
+  let masteredSomething = false;
   const strongSkills = new Set(
     (analysis.per_skill || []).filter((p) => p.understanding >= 80).map((p) => p.skill)
   );
@@ -222,18 +235,43 @@ For EACH skill practiced, decide a verdict. Advance ONLY if the skill is ELIGIBL
     for (const t of topics || []) {
       const p = (analysis.per_skill || []).find((x) => x.skill === t.skill);
       const mastery = Math.max(t.mastery, p?.understanding ?? 0);
+      const newStatus = mastery >= 85 ? "mastered" : t.status === "planned" ? "active" : t.status;
+      if (newStatus === "mastered" && t.status !== "mastered") masteredSomething = true;
       await supabase
         .from("curriculum")
         .update({
           mastery,
-          status: mastery >= 85 ? "mastered" : t.status === "planned" ? "active" : t.status,
+          status: newStatus,
           updated_at: new Date().toISOString(),
         })
         .eq("id", t.id);
     }
   }
 
+  // ---- Auto-evolve the path (the core of Butler: the plan paves itself) ----
+  // Reshape the PLANNED tail against the freshly-updated profile whenever the
+  // session moved the needle — a level change, a newly mastered topic, or a
+  // fresh gap/misconception. Non-destructive: active/mastered rows are untouched.
+  const leveledOrDropped = updates.some(
+    (u) => (cur.get(u.skill)?.level ?? 1) !== u.level
+  );
+  const shouldEvolve = leveledOrDropped || masteredSomething;
+  let evolution: Awaited<ReturnType<typeof evolvePlan>> | null = null;
+  if (shouldEvolve) {
+    try {
+      evolution = await evolvePlan(supabase, user.id, {
+        narrative: analysis.narrative,
+        strengths: analysis.strengths,
+        gaps: analysis.gaps,
+        misconceptions: analysis.misconceptions,
+      });
+    } catch (e: any) {
+      evolution = { status: "error", reason: e?.message || "evolve failed" };
+    }
+  }
+
   return NextResponse.json({
+    plan: evolution,
     status: "processed",
     narrative: analysis.narrative,
     leveled: updates

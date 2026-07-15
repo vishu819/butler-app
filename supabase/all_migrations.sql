@@ -206,3 +206,11 @@ begin
   return new;
 end;
 $$;
+
+-- ---------- 014: role-aware onboarding ----------
+alter table profiles add column if not exists target_role text;
+alter table profiles add column if not exists experience text;
+alter table profiles add column if not exists onboarded boolean not null default false;
+update profiles p
+set onboarded = true
+where exists (select 1 from curriculum c where c.user_id = p.id);

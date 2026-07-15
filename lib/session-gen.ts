@@ -2,7 +2,7 @@
 // deep questions each at that sector's CURRENT level (gradual journey).
 import { chat } from "@/lib/openrouter";
 import { modelFor } from "@/lib/models";
-import { SKILLS, SKILL_KEYS, LEVEL_NAME } from "@/lib/skills";
+import { SKILLS, ALL_SKILLS, ALL_SKILL_KEYS, LEVEL_NAME } from "@/lib/skills";
 
 export type FollowupMCQ = {
   q: string;
@@ -31,13 +31,18 @@ type SkillRow = { skill: string; level?: number; proficiency?: number; seen?: nu
 export function pickFocusSkills(
   rows: SkillRow[],
   n = 4,
-  recentlyCovered: string[] = []
+  recentlyCovered: string[] = [],
+  allowedSkillKeys?: string[]
 ): { key: string; level: number; label: string }[] {
   // Count how recently each skill was covered (0 = not recent).
   const recencyCount = new Map<string, number>();
   recentlyCovered.forEach((k) => recencyCount.set(k, (recencyCount.get(k) || 0) + 1));
 
-  const state = SKILLS.map((s) => {
+  // Restrict to the learner's role skill set when provided; otherwise all.
+  const pool = allowedSkillKeys
+    ? ALL_SKILLS.filter((s) => allowedSkillKeys.includes(s.key))
+    : SKILLS;
+  const state = pool.map((s) => {
     const r = rows.find((x) => x.skill === s.key);
     const proficiency = r?.proficiency ?? 0;
     const seen = r?.seen ?? 0;
@@ -54,7 +59,20 @@ export function pickFocusSkills(
 }
 
 const SYS =
-  "You are Butler, a staff-level software-architecture mentor writing a daily learning session. Write SPECIFIC, deep questions rooted in REAL large-scale software problems — the hard tradeoffs and failure modes that senior engineers and architects actually face and commonly get WRONG: consistency vs availability under partition, hot-partition and sharding pitfalls, cache stampede/invalidation, backpressure and queue overload, idempotency and exactly-once myths, N+1 and index design, thundering herd, cascading failure and bulkheads, schema evolution, tail latency. Prefer concrete scenarios with real numbers and named failure modes over textbook definitions. Difficulty matches the stated level (1 = approachable for a mid-level engineer, 5 = staff/architect depth). Each question has a multiple-choice part AND an open follow-up that forces the learner to explain the underlying tradeoff/reasoning. Return JSON only.";
+  "You are Butler, a software-architecture mentor writing a daily learning session that walks the learner INCREMENTALLY from fundamentals to real architect-level judgment. The end goal is architect thinking, but you get there in stages — you do NOT hand someone a staff-level multi-region-consistency tradeoff before they've got the basics of that topic. CALIBRATE every question's depth to its stated level (1-5). Ramp the learner up; never skip ahead. All questions still concern REAL software problems (consistency vs availability, sharding/hot-partitions, cache invalidation, backpressure, idempotency, index design, cascading failure, schema evolution, tail latency, quorum/replication) — what changes with level is how much judgment and how many competing forces the question demands. Each question has a multiple-choice part AND an open follow-up that pushes the learner to explain their reasoning. Return JSON only.";
+
+// Per-level rubric so difficulty is INCREMENTAL, not uniformly "architect-hard".
+// Fundamentals are taught cleanly at low levels; the full tradeoff framing is
+// reserved for a learner who has already earned it at this skill.
+const LEVEL_RUBRIC: Record<number, string> = {
+  1: "LEVEL 1 (Foundational): teach the core mechanism cleanly. One clear correct answer, plausible-but-wrong distractors. A single concept, no competing tradeoffs yet. Concrete but small-scale. Goal: build correct intuition.",
+  2: "LEVEL 2 (Applied): apply the concept to a realistic (still bounded) scenario. Introduce ONE tradeoff or failure mode. The learner should reason, not just recall.",
+  3: "LEVEL 3 (Intermediate): a real design choice between two defensible options, with a clear-ish best answer once you reason it through. Include concrete numbers (QPS, size, latency). One second-order effect to notice.",
+  4: "LEVEL 4 (Advanced): a genuine architect tradeoff — the 'obvious' answer is subtly wrong; every option is something a competent engineer might pick. Real scale, multiple interacting constraints, name the real system/incident it echoes when you can.",
+  5: "LEVEL 5 (Staff/architect): the hard case seniors get WRONG. Competing second-order effects, no free lunch — the best answer wins only on a subtle margin. Force the learner to weigh what they give up. Ground it in a real large-scale failure.",
+};
+
+const levelRubric = (lv: number): string => LEVEL_RUBRIC[Math.max(1, Math.min(5, lv || 1))];
 
 // Web-grounding step: gather real-world failure cases / tradeoffs for the focus
 // skills using OpenRouter's :online plugin. Returns plain text. Best-effort — on
@@ -87,33 +105,49 @@ export async function generateSession(
   focus: { key: string; level: number; label: string }[],
   perSkill: number,
   webContext?: string,
-  newTopic?: { topic: string; skill: string } | null
+  newTopic?: { topic: string; skill: string } | null,
+  pathTopics?: { topic: string; skill: string; rationale?: string }[],
+  roleFraming?: string
 ): Promise<SessionQuestion[]> {
   const spec = focus
-    .map((f) => `- ${perSkill} REINFORCEMENT questions on "${f.key}" (${f.label}) at level ${f.level}/5 (${LEVEL_NAME[f.level]})`)
+    .map(
+      (f) =>
+        `- ${perSkill} REINFORCEMENT questions on "${f.key}" (${f.label}) at level ${f.level}/5 (${LEVEL_NAME[f.level]}).\n  ${levelRubric(f.level)}`
+    )
     .join("\n");
 
-  // Guarantee daily novelty: always include a couple of questions on a brand-new
-  // concept the learner hasn't seen, introduced at an approachable level.
+  // Anchor reinforcement to the learner's ACTIVE curriculum topics — the session
+  // must advance their PATH, not drift onto unrelated trivia. Tie each active
+  // path topic to whichever focus skill it maps to.
+  const pathSpec = (pathTopics || []).length
+    ? `\nThese are the learner's ACTIVE path topics — frame reinforcement questions around them wherever the skill matches, so the session moves their plan forward:\n${(pathTopics || [])
+        .map((p) => `- "${p.topic}" (skill "${p.skill}")${p.rationale ? ` — ${p.rationale}` : ""}`)
+        .join("\n")}`
+    : "";
+
+  // Guarantee daily novelty: always include one question on a brand-new concept
+  // the learner hasn't seen, introduced at an approachable level.
   const newSpec = newTopic
-    ? `\n- 2 questions introducing a NEW concept the learner hasn't studied: "${newTopic.topic}" (skill "${newTopic.skill}") at level 1-2 (approachable first exposure — teach, don't trick).`
+    ? `\n- 1 question introducing a NEW concept the learner hasn't studied: "${newTopic.topic}" (skill "${newTopic.skill}") at level 1-2 (approachable first exposure — teach, don't trick).`
     : "";
 
   const raw = await chat(
     [
-      { role: "system", content: SYS },
+      { role: "system", content: roleFraming ? `${SYS}\n\nTARGET ROLE CONTEXT: ${roleFraming}` : SYS },
       {
         role: "user",
         content: `Generate a focused daily session. The learner should LEARN SOMETHING NEW today AND reinforce a weak area:
-${spec}${newSpec}
+${spec}${pathSpec}${newSpec}
 ${webContext ? `\nGround the questions in this real reference material:\n${webContext}\n` : ""}
 USE WEB SEARCH to ground questions in REAL, current material: recent postmortems, well-known outages, up-to-date best practices, and real system designs for these topics. Base scenarios on things that actually happened (name the company/system/incident where you can) rather than invented examples.
 
-For each question provide: (a) a multiple-choice question, (b) a follow-up OPEN question the learner types a short answer to (push them to explain the tradeoff/reasoning), and (c) exactly 3 deeper follow-up MULTIPLE-CHOICE questions on the SAME concept that drill progressively into the tradeoff/edge-cases (each stands alone, graded automatically). For the NEW concept, the explanation should genuinely teach it.
+CALIBRATE each question to ITS stated level using the rubric above — do not write a level-5 tradeoff for a level-1 skill or vice versa. The learner rises one step at a time.
+
+For each question provide: (a) a multiple-choice question, (b) a follow-up OPEN question the learner types a short answer to (push them to explain the reasoning, at a depth appropriate to the level), and (c) exactly 3 deeper follow-up MULTIPLE-CHOICE questions on the SAME concept at the SAME level, drilling progressively into it (each stands alone, graded automatically). For the NEW concept, the explanation should genuinely teach it.
 
 Return ONLY a JSON object (no prose, no citations outside the JSON):
 {"questions":[{"skill":"the skill key","level":<the level number>,"concept":"short tag e.g. 'write-heavy sharding'","question":"specific MCQ","options":["A","B","C","D"],"correct":0,"explanation":"3-5 sentences teaching the principle","followup_prompt":"an open question probing WHY / the tradeoff, answerable in 2-3 sentences","followup_mcqs":[{"q":"a deeper MCQ on the same concept","options":["A","B","C","D"],"correct":0,"explanation":"1-2 sentences on why"}]}]}
-Exactly 4 options for every MCQ (main and follow-ups), vary the correct index. Exactly 3 items in followup_mcqs. Make scenarios concrete (real numbers, real failure modes).`,
+Exactly 4 options for every MCQ (main and follow-ups), vary the correct index. Exactly 3 items in followup_mcqs. Match each question's concreteness to its level (higher levels get real numbers and named incidents; lower levels stay clean and focused).`,
       },
     ],
     // :online grounds questions in real incidents/best-practices. json:true keeps
@@ -139,7 +173,7 @@ export function parseSession(raw: string): SessionQuestion[] {
   return arr
     .map((q: any) => ({
       ...q,
-      skill: SKILL_KEYS.includes(q?.skill) ? q.skill : null,
+      skill: ALL_SKILL_KEYS.includes(q?.skill) ? q.skill : null,
       followup_mcqs: sanitizeFollowupMCQs(q?.followup_mcqs),
     }))
     .filter(
