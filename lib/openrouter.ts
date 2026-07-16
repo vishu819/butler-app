@@ -8,7 +8,7 @@ export type ChatMessage = { role: "system" | "user" | "assistant"; content: stri
 // SERVER ONLY. Caller is responsible for persisting the full text after the stream.
 export async function* chatStream(
   messages: ChatMessage[],
-  opts: { model?: string; temperature?: number; timeoutMs?: number; online?: boolean } = {}
+  opts: { model?: string; temperature?: number; maxTokens?: number; timeoutMs?: number; online?: boolean; json?: boolean } = {}
 ): AsyncGenerator<string, void, unknown> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw new Error("OPENROUTER_API_KEY is not set");
@@ -34,6 +34,8 @@ export async function* chatStream(
         messages,
         temperature: opts.temperature ?? 0.7,
         stream: true,
+        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
       }),
     });
   } catch (e: any) {

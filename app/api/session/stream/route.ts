@@ -160,7 +160,9 @@ Exactly 4 options for every MCQ (main and follow-ups), vary the correct index. E
         for await (const chunk of chatStream(messages, {
           model: modelFor("generate"),
           online: true,
+          json: true,
           temperature: 0.8,
+          maxTokens: 16000,
           timeoutMs: 75000,
         })) {
           buffer += chunk;
