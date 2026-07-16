@@ -137,7 +137,7 @@ export async function GET(req: Request) {
   return NextResponse.json({ date: today, results });
 }
 
-// Review yesterday's quiz (questions + right/wrong) and write "what you learned today".
+// Review yesterday's session (questions + right/wrong) and write "what you learned today".
 async function summarizeLearning(
   admin: ReturnType<typeof createAdminClient>,
   userId: string
@@ -158,28 +158,32 @@ async function summarizeLearning(
     .maybeSingle();
   if (existing) return "exists";
 
-  // Yesterday's quiz + result.
-  const { data: qc } = await admin
-    .from("daily_content")
-    .select("payload")
-    .eq("content_date", dayKey)
-    .eq("type", "eng_q")
-    .maybeSingle();
-  const questions = ((qc?.payload as any)?.questions || []) as any[];
-  if (questions.length === 0) return "skip: no quiz";
-
-  const { data: result } = await admin
-    .from("quiz_results")
-    .select("score, total, answers")
+  // Yesterday's session (on-demand Session, replaces the retired eng_q quiz).
+  const { data: session } = await admin
+    .from("sessions")
+    .select("questions, responses")
     .eq("user_id", userId)
-    .eq("quiz_date", dayKey)
+    .eq("session_date", dayKey)
     .maybeSingle();
-  const answers = (result?.answers || []) as { qi: number; isCorrect: boolean }[];
-  const correctSet = new Set(answers.filter((a) => a.isCorrect).map((a) => a.qi));
+  if (!session) return "skip: no session";
 
+  const questions = (session.questions || []) as any[];
+  const responses = (session.responses || []) as any[];
+  if (questions.length === 0) return "skip: no questions";
+
+  const answered = new Map<number, any>();
+  for (const r of responses) {
+    answered.set(r.qi, r);
+  }
+
+  let score = 0;
   const qList = questions
     .map((q, i) => {
-      const status = result ? (correctSet.has(i) ? "✓ got right" : "✗ missed") : "not answered";
+      const r = answered.get(i);
+      const mcqCorrect = r?.mcq_correct;
+      if (mcqCorrect) score++;
+      const fuScore = r?.followup_score != null ? ` (written: ${r.followup_score}/100)` : "";
+      const status = r ? (mcqCorrect ? `✓ got right${fuScore}` : "✗ missed") : "not answered";
       return `- [${q.concept}] ${q.question} (${status})\n  Key idea: ${q.explanation}`;
     })
     .join("\n");
@@ -191,7 +195,7 @@ async function summarizeLearning(
         content:
           "You write a short 'what you learned today' recap for an engineer studying to become an architect. Given the day's quiz questions, their key ideas, and which the learner got right/wrong, produce an encouraging Markdown recap: a one-line intro, 3-6 bullet takeaways (emphasize concepts they MISSED as things to reinforce), and a one-line 'focus tomorrow'. Concise, concrete, no fluff.",
       },
-      { role: "user", content: `Date: ${dayKey}\nScore: ${result ? `${result.score}/${result.total}` : "n/a"}\n\nQuestions:\n${qList}` },
+      { role: "user", content: `Date: ${dayKey}\nScore: ${score}/${questions.length}\n\nQuestions:\n${qList}` },
     ],
     { temperature: 0.5, maxTokens: 500, timeoutMs: 40000 }
   );
@@ -202,8 +206,8 @@ async function summarizeLearning(
     learn_date: dayKey,
     summary: summary.trim(),
     concepts,
-    score: result?.score ?? null,
-    total: result?.total ?? null,
+    score,
+    total: questions.length,
   });
   if (error) return `error: ${error.message}`;
   return "ok";
