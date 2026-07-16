@@ -58,13 +58,13 @@ export function pickFocusSkills(
   return ranked.slice(0, n).map((s) => ({ key: s.key, level: s.level, label: s.label }));
 }
 
-const SYS =
+export const SYS =
   "You are Butler, a software-architecture mentor writing a daily learning session that walks the learner INCREMENTALLY from fundamentals to real architect-level judgment. The end goal is architect thinking, but you get there in stages — you do NOT hand someone a staff-level multi-region-consistency tradeoff before they've got the basics of that topic. CALIBRATE every question's depth to its stated level (1-5). Ramp the learner up; never skip ahead. All questions still concern REAL software problems (consistency vs availability, sharding/hot-partitions, cache invalidation, backpressure, idempotency, index design, cascading failure, schema evolution, tail latency, quorum/replication) — what changes with level is how much judgment and how many competing forces the question demands. Each question has a multiple-choice part AND an open follow-up that pushes the learner to explain their reasoning. Return JSON only.";
 
 // Per-level rubric so difficulty is INCREMENTAL, not uniformly "architect-hard".
 // Fundamentals are taught cleanly at low levels; the full tradeoff framing is
 // reserved for a learner who has already earned it at this skill.
-const LEVEL_RUBRIC: Record<number, string> = {
+export const LEVEL_RUBRIC: Record<number, string> = {
   1: "LEVEL 1 (Foundational): teach the core mechanism cleanly. One clear correct answer, plausible-but-wrong distractors. A single concept, no competing tradeoffs yet. Concrete but small-scale. Goal: build correct intuition.",
   2: "LEVEL 2 (Applied): apply the concept to a realistic (still bounded) scenario. Introduce ONE tradeoff or failure mode. The learner should reason, not just recall.",
   3: "LEVEL 3 (Intermediate): a real design choice between two defensible options, with a clear-ish best answer once you reason it through. Include concrete numbers (QPS, size, latency). One second-order effect to notice.",
@@ -72,7 +72,7 @@ const LEVEL_RUBRIC: Record<number, string> = {
   5: "LEVEL 5 (Staff/architect): the hard case seniors get WRONG. Competing second-order effects, no free lunch — the best answer wins only on a subtle margin. Force the learner to weigh what they give up. Ground it in a real large-scale failure.",
 };
 
-const levelRubric = (lv: number): string => LEVEL_RUBRIC[Math.max(1, Math.min(5, lv || 1))];
+export const levelRubric = (lv: number): string => LEVEL_RUBRIC[Math.max(1, Math.min(5, lv || 1))];
 
 // Web-grounding step: gather real-world failure cases / tradeoffs for the focus
 // skills using OpenRouter's :online plugin. Returns plain text. Best-effort — on
@@ -195,7 +195,7 @@ export function parseSession(raw: string): SessionQuestion[] {
 // Recover complete question objects from a truncated JSON string (the model hit
 // the token cap mid-array). Walks the top-level questions array, extracting each
 // balanced {...} object and dropping the final incomplete one.
-function salvageQuestions(raw: string): { questions: any[] } | null {
+export function salvageQuestions(raw: string): { questions: any[] } | null {
   const start = raw.indexOf('"questions"');
   if (start === -1) return null;
   const bracket = raw.indexOf("[", start);

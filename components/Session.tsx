@@ -165,12 +165,73 @@ export default function Session({
   async function generate() {
     setGenerating(true);
     setErr(null);
+    setQuestions([]);
     try {
-      const res = await fetch("/api/session", { method: "POST" });
-      const text = await res.text();
-      const j = text ? JSON.parse(text) : {};
-      if (res.ok) load();
-      else setErr(j.error || `Couldn't start session (${res.status}).`);
+      const res = await fetch("/api/session/stream");
+      if (!res.ok) {
+        const text = await res.text();
+        const j = text ? JSON.parse(text) : {};
+        setErr(j.error || `Couldn't start session (${res.status}).`);
+        return;
+      }
+
+      // If the response is JSON (session exists / error), handle it directly.
+      const contentType = res.headers.get("Content-Type") || "";
+      if (contentType.includes("json")) {
+        const j = await res.json();
+        if (j.status === "exists") {
+          load();
+        } else {
+          setErr(j.error || "Couldn't start session.");
+        }
+        return;
+      }
+
+      // SSE stream — read questions as they arrive from the LLM.
+      const reader = res.body?.getReader();
+      if (!reader) throw new Error("No response body");
+
+      const decoder = new TextDecoder();
+      let buf = "";
+      let streamQuestions: Q[] = [];
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+
+        // Split on double-newline (SSE event boundary).
+        const parts = buf.split("\n\n");
+        buf = parts.pop() || ""; // keep incomplete part in buffer
+
+        for (const part of parts) {
+          const lines = part.split("\n");
+          let eventType = "";
+          let data = "";
+          for (const line of lines) {
+            if (line.startsWith("event: ")) eventType = line.slice(7).trim();
+            else if (line.startsWith("data: ")) data = line.slice(6);
+          }
+          if (!data) continue;
+
+          let parsed: any;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            continue;
+          }
+
+          if (eventType === "question") {
+            streamQuestions = [...streamQuestions, parsed as Q];
+            setQuestions(streamQuestions);
+          } else if (eventType === "done") {
+            // Generation complete — session is saved to DB. Load to sync.
+            load();
+          } else if (eventType === "error") {
+            setErr(parsed.message || "Generation failed");
+          }
+        }
+      }
     } catch {
       setErr("Something went wrong. Please try again.");
     } finally {
@@ -198,8 +259,9 @@ export default function Session({
         setPhase("reviewed");
         if (j.complete) {
           setStatus("complete");
-          toast("Session complete! Analyzing…", "good");
-          runProcess();
+          toast("Session complete! Tap to save progress.", "good");
+          // Don't auto-run the judge — it's a 30-50s LLM call. Let the user
+          // tap "Finish & save progress" when they're ready to analyze.
         }
       } else setErr(j.error || "Grading failed");
     } catch {
