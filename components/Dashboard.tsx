@@ -70,34 +70,37 @@ export default function Dashboard({ name, email }: { name: string; email: string
     prefetch("/api/session");
     prefetch("/api/goals");
 
+    // Fire immediately (no delay): first-run setup — ensure a baseline profile
+    // + build the plan if missing. /api/init is fast (DB checks only); the plan
+    // build is slow (LLM) but runs in the background with a banner.
+    fetch("/api/init", { method: "POST" })
+      .then((r) => r.json())
+      .then((j) => {
+        if (!j.needsPlan) {
+          prefetch("/api/plan");
+          return;
+        }
+        // Build the curriculum in the BACKGROUND (onboarding entered the app
+        // immediately). Show a banner until it lands, then refresh caches.
+        setPlanBuilding(true);
+        fetch("/api/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ mode: "rebuild" }),
+        })
+          .catch(() => {})
+          .finally(() => {
+            setPlanBuilding(false);
+            invalidate("/api/plan");
+            invalidate("/api/session");
+            invalidate("/api/profile");
+            prefetch("/api/plan");
+          });
+      })
+      .catch(() => {});
+
     // Non-critical: run after first paint so they don't compete with the above.
     const t = setTimeout(() => {
-      // First-run setup: ensure a baseline profile + build the plan if missing.
-      fetch("/api/init", { method: "POST" })
-        .then((r) => r.json())
-        .then((j) => {
-          if (!j.needsPlan) {
-            prefetch("/api/plan");
-            return;
-          }
-          // Build the curriculum in the BACKGROUND (onboarding entered the app
-          // immediately). Show a banner until it lands, then refresh caches.
-          setPlanBuilding(true);
-          fetch("/api/plan", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ mode: "rebuild" }),
-          })
-            .catch(() => {})
-            .finally(() => {
-              setPlanBuilding(false);
-              invalidate("/api/plan");
-              invalidate("/api/session");
-              invalidate("/api/profile");
-              prefetch("/api/plan");
-            });
-        })
-        .catch(() => {});
       prefetch("/api/learning");
     }, 400);
     return () => clearTimeout(t);
