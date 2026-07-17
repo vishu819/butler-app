@@ -157,6 +157,116 @@ export async function GET(req: Request) {
   return NextResponse.json({ date: today, results });
 }
 
+// Build the deep article by planning sections, generating them in parallel, and
+// clubbing the results. Each section is an independent bounded call — this is
+// both faster (parallel) and more reliable (no single call can end the whole
+// article early). Falls back to a single monolithic call if planning fails.
+async function buildArticle(
+  targetRole: string,
+  activityBrief: string,
+  missed: string[],
+  skipped: string[]
+): Promise<string> {
+  const END = "<!--END-->";
+
+  // Generate one HTML fragment for a focused assignment, continuing if the token
+  // limit cut it off (finishReason "length"). Returns clean HTML (sentinel stripped).
+  async function fragment(
+    system: string,
+    user: string,
+    { maxTokens = 2200, online = false }: { maxTokens?: number; online?: boolean } = {}
+  ): Promise<string> {
+    const msgs: { role: "system" | "user" | "assistant"; content: string }[] = [
+      { role: "system", content: system },
+      { role: "user", content: user },
+    ];
+    let out = "";
+    for (let round = 0; round < 3; round++) {
+      const { content, finishReason } = await chatWithMeta(msgs, {
+        model: modelFor(online ? "web" : "generate"),
+        temperature: 0.6,
+        maxTokens,
+        timeoutMs: 45000,
+        online,
+      });
+      out += content;
+      if (out.includes(END) || finishReason !== "length") break;
+      msgs.push({ role: "assistant", content });
+      msgs.push({
+        role: "user",
+        content: `Continue from exactly where you stopped — no repetition, no preamble. End with ${END} when done.`,
+      });
+    }
+    return out.split(END)[0].trim();
+  }
+
+  // 1) PLAN — the 3-5 concept sections to write.
+  let sections: { title: string; focus: string }[] = [];
+  try {
+    const raw = await chat(
+      [
+        {
+          role: "system",
+          content: `You plan a deep study article for a learner training toward "${targetRole}". Pick the 3-5 highest-leverage concepts from their activity — PRIORITISE what they missed or skipped. Return JSON only.`,
+        },
+        {
+          role: "user",
+          content: `${activityBrief}\n\nReturn JSON: {"sections":[{"title":"concept name","focus":"what to teach & which gap it closes"}]} — 3 to 5 sections, most important first.`,
+        },
+      ],
+      { model: modelFor("generate"), json: true, temperature: 0.4, maxTokens: 700, timeoutMs: 25000 }
+    );
+    const parsed = JSON.parse(raw);
+    sections = (parsed.sections || [])
+      .filter((s: any) => s?.title)
+      .slice(0, 5)
+      .map((s: any) => ({ title: String(s.title), focus: String(s.focus || "") }));
+  } catch {
+    sections = [];
+  }
+
+  // Fallback: no plan → one monolithic call (still continuation-guarded).
+  if (sections.length === 0) {
+    return fragment(
+      `You are Butler, an elite mentor writing a learner's DAILY DEEP-DIVE. Training toward "${targetRole}". Teach the concepts they engaged with from foundations to ${targetRole}-level depth, focusing on what they got wrong/skipped. Output semantic HTML only (<h2>/<h3>/<p>/<ul>/<li>/<strong>/<code>/<pre>). Start with <h2>What you touched yesterday</h2>, a MISSED/SKIPPED callout <div>, one <h2> per concept, then <h2>Don't miss this</h2>. End with ${END}.`,
+      activityBrief,
+      { maxTokens: 4000, online: true }
+    );
+  }
+
+  const gaps = [...missed, ...skipped];
+  const secSystem = `You are Butler, an elite mentor. Write ONE section of a larger study article for a learner training toward "${targetRole}". Teach this ONE concept rigorously: foundations → tradeoffs → ${targetRole}-level decisions → common mistakes/failure modes. Concrete numbers, worked examples, short code where it clarifies. Output semantic HTML only — a single <h2> heading for the concept then <p>/<ul>/<li>/<strong>/<em>/<code>/<pre><code>. No preamble, no <html> wrapper. You MAY use web search for authoritative references, cited as <a href>. End with ${END}.`;
+
+  // 2) SECTIONS — generate all in parallel.
+  const bodies = await Promise.all(
+    sections.map((s, i) =>
+      fragment(
+        secSystem,
+        `Concept: "${s.title}"\nWhat to cover: ${s.focus}\n${
+          gaps.includes(s.title) ? "NOTE: the learner got this WRONG or SKIPPED it — be especially thorough on where the misunderstanding lies.\n" : ""
+        }\nContext (their activity):\n${activityBrief.slice(0, 2500)}`,
+        { maxTokens: 2200, online: true }
+      ).catch(() => `<h2>${s.title}</h2><p>(Could not generate this section.)</p>`)
+    )
+  );
+
+  // 3) CLUB — intro + missed/skipped callout + sections + takeaways.
+  const [intro, takeaways] = await Promise.all([
+    fragment(
+      `Write the opening of a study article as semantic HTML: an <h2>What you touched yesterday</h2> heading + one orienting <p>, then a <div> callout naming what they MISSED or SKIPPED and why it matters most. HTML only. End with ${END}.`,
+      activityBrief,
+      { maxTokens: 500 }
+    ).catch(() => ""),
+    fragment(
+      `Write a closing <h2>Don't miss this</h2> section as semantic HTML: a <ul> of the 5-8 highest-leverage takeaways across these concepts: ${sections.map((s) => s.title).join(", ")}. HTML only. End with ${END}.`,
+      activityBrief,
+      { maxTokens: 700 }
+    ).catch(() => ""),
+  ]);
+
+  return [intro, ...bodies, takeaways].filter(Boolean).join("\n\n").trim();
+}
+
 // Review ALL of yesterday's activity — session questions (incl. the ones missed
 // or skipped), every "Learn this topic" article, and all concepts covered — and
 // synthesize ONE deep, consolidated HTML study article the learner shouldn't
@@ -252,31 +362,13 @@ async function summarizeLearning(
         .join("\n\n")
     : "(none)";
 
-  // ---- Heavy LLM call → deep, consolidated HTML study article ----
-  // We tell the model to end with a sentinel (<!--END-->) so we can tell a
-  // finished article from one the token limit cut off mid-sentence. If it's cut
-  // off, we continue-generate (append the partial + ask it to resume) and stitch
-  // — up to a few rounds — so the article is never left dangling.
-  const END = "<!--END-->";
-  const articleMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
-    {
-      role: "system",
-      content: `You are Butler, an elite mentor writing a learner's DAILY DEEP-DIVE study article — the one thing they must not skip. The learner is training toward "${targetRole}". Consolidate everything they touched yesterday into ONE cohesive, rigorous article that takes them from foundations up to ${targetRole}-level depth on exactly the concepts they engaged with — with SPECIAL FOCUS on what they got wrong or skipped (those are the gaps to close).
-
-Write real, substantive teaching — not a recap. For each key concept: explain it from first principles, then go deep into the tradeoffs, failure modes, and real-world decisions a senior/${targetRole} engineer must reason about. Use concrete numbers, worked examples, and short code snippets where they clarify. Weave in and EXPAND the "Learn this topic" articles they opened so this becomes the single consolidated read.
-
-Prioritise DEPTH on the concepts they missed or skipped over breadth. Focus on the 3-5 highest-leverage concepts rather than covering everything shallowly — go deep on those. Keep it tight and information-dense; no filler, no restating the question text.
-
-Output valid semantic HTML only (no markdown, no <html>/<head>/<body> wrapper, no <script> or <style>). Use <h2>/<h3> headings, <p>, <ul>/<li>, <strong>, <em>, <code>, and <pre><code> for code blocks. Structure:
-1. <h2>What you touched yesterday</h2> — a short orienting paragraph.
-2. A <div> callout listing what they MISSED or SKIPPED and why it matters most.
-3. One <h2> section per key concept — foundations → depth → ${targetRole}-level tradeoffs → common mistakes.
-4. <h2>Don't miss this</h2> — the 5-8 highest-leverage takeaways.
-When the article is fully complete, output the exact marker ${END} on its own line as the very last thing. Return ONLY the HTML (plus that final marker).`,
-    },
-    {
-      role: "user",
-      content: `Date: ${dayKey}
+  // ---- Deep article via PLAN → parallel SECTIONS → club ----
+  // A single call proved unreliable: the web-search model sometimes ends the
+  // whole article after one paragraph. Instead we (1) plan the sections, then
+  // (2) generate each section IN PARALLEL — each is its own bounded assignment,
+  // so no section can be prematurely truncated and wall-clock ≈ the slowest
+  // single section, not the sum. Then we club them into one article.
+  const activityBrief = `Date: ${dayKey}
 Session score: ${questions.length ? `${score}/${questions.length}` : "no session"}
 Concepts MISSED (wrong): ${missed.join(", ") || "none"}
 Concepts SKIPPED (not answered): ${skipped.join(", ") || "none"}
@@ -285,36 +377,10 @@ Concepts got right: ${gotRight.join(", ") || "none"}
 === Session questions (with the correct idea and their result) ===
 ${qList || "(no session)"}
 
-=== "Learn this topic" articles they opened yesterday (consolidate & expand these) ===
-${learnBrief}`,
-    },
-  ];
+=== "Learn this topic" articles they opened yesterday ===
+${learnBrief}`;
 
-  let article = "";
-  // maxDuration is 60s (Hobby); leave headroom for the summary call + insert.
-  const articleDeadline = Date.now() + 50_000;
-  for (let round = 0; round < 4; round++) {
-    const { content, finishReason } = await chatWithMeta(articleMessages, {
-      model: modelFor("generate"),
-      temperature: 0.6,
-      maxTokens: 4000,
-      timeoutMs: 45000,
-    });
-    article += content;
-    // Done if the model emitted the sentinel or stopped naturally.
-    if (article.includes(END) || finishReason === "stop") break;
-    // Only a token-limit cutoff ("length") warrants a continue; anything else, stop.
-    if (finishReason !== "length") break;
-    if (Date.now() > articleDeadline) break; // out of time budget — ship what we have
-    // Continue from exactly where it left off.
-    articleMessages.push({ role: "assistant", content });
-    articleMessages.push({
-      role: "user",
-      content: `Continue the HTML article from exactly where you stopped — do not repeat anything already written, do not add a preamble, just resume mid-flow. Remember to end with ${END} when fully done.`,
-    });
-  }
-  // Strip the completion sentinel before we store/render.
-  article = article.split(END)[0].trimEnd();
+  const article = await buildArticle(targetRole, activityBrief, missed, skipped);
 
   // Short markdown teaser (kept in `summary`) so the Library list stays scannable.
   const summary = await chat(
