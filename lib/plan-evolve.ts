@@ -33,6 +33,32 @@ type EvolveResult =
   | { status: "skipped"; reason: string }
   | { status: "error"; reason: string };
 
+type HistEntry = { date?: string; level?: number; understanding?: number; verdict?: string };
+
+// Collapse a skill's session history (capped at 12 entries) into ONE compact
+// line the path-builder can reason over: where it started, where it is, and
+// which way it's moving. This is deliberately bounded — one line per skill,
+// never the raw per-session transcripts — so the prompt does not grow with how
+// long the learner has used the app.
+function trendLine(history: HistEntry[] | null | undefined): string {
+  const h = (history || []).filter((x) => typeof x?.understanding === "number");
+  if (h.length === 0) return "";
+  const first = h[0];
+  const last = h[h.length - 1];
+  const u0 = first.understanding ?? 0;
+  const u1 = last.understanding ?? 0;
+  const lvl0 = first.level ?? 1;
+  const lvl1 = last.level ?? lvl0;
+
+  // Direction from the slope of the last few points (steady if it barely moved).
+  const tail = h.slice(-3);
+  const slope = (tail[tail.length - 1].understanding ?? 0) - (tail[0].understanding ?? 0);
+  const dir = slope > 8 ? "rising" : slope < -8 ? "dipping" : "steady";
+
+  const lvlPart = lvl1 !== lvl0 ? `L${lvl0}→L${lvl1}` : `L${lvl1}`;
+  return `${lvlPart}, understanding ${u0}→${u1} (${dir}) over ${h.length} session${h.length === 1 ? "" : "s"}`;
+}
+
 // A cheap client-side guard so we don't spam the LLM: only re-plan when the tail
 // of planned topics is short (learner is catching up) OR the profile clearly
 // changed. The judge decides WHEN to call this; here we just do the work.
@@ -48,7 +74,7 @@ export async function evolvePlan(
       .select("id, module, topic, skill, rationale, position, status, mastery")
       .eq("user_id", userId)
       .order("position"),
-    supabase.from("skill_profile").select("skill, level, proficiency").eq("user_id", userId),
+    supabase.from("skill_profile").select("skill, level, proficiency, history").eq("user_id", userId),
     supabase.from("profiles").select("target_role").eq("id", userId).maybeSingle(),
   ]);
 
@@ -64,7 +90,10 @@ export async function evolvePlan(
   const skillLevels = roleSkillKeys
     .map((k) => {
       const r = (skillData || []).find((x) => x.skill === k);
-      return `- ${SKILL_LABEL[k] || k}: ${r ? `lvl ${r.level}, ${r.proficiency}/100` : "not assessed"}`;
+      if (!r) return `- ${SKILL_LABEL[k] || k}: not assessed`;
+      const trend = trendLine(r.history as HistEntry[]);
+      const base = `lvl ${r.level}, ${r.proficiency}/100`;
+      return `- ${SKILL_LABEL[k] || k}: ${base}${trend ? ` — trend: ${trend}` : ""}`;
     })
     .join("\n");
 
@@ -85,11 +114,18 @@ export async function evolvePlan(
       [
         {
           role: "system",
-          content: `You are Butler, a mentor maintaining a learner's living curriculum. ${role.framing} Given their freshly-updated profile and what they've already mastered/started, you PRUNE and EXTEND only the not-yet-started ('planned') tail of their path. You must NEVER remove or re-topic anything active or mastered — that is earned history. Keep planned topics that still serve their current gaps; drop planned topics that are now redundant (a gap closed, or subsumed by something mastered); add 1-4 NEW planned topics that their latest gaps/misconceptions reveal they need next — always fitting the target role, never drifting into unrelated domains. Prefer the tradeoff-heavy, failure-mode topics people in this role get wrong. Be surgical, not sweeping — most sessions change little. Return JSON only.`,
+          content: `You are Butler, a mentor maintaining a learner's living curriculum. ${role.framing} Given their freshly-updated profile and what they've already mastered/started, you PRUNE and EXTEND only the not-yet-started ('planned') tail of their path. You must NEVER remove or re-topic anything active or mastered — that is earned history.
+
+Read each skill's TREND (direction of understanding over recent sessions) as your primary signal alongside their gaps and misconceptions:
+- A skill trending 'rising' toward mastery needs LESS reinforcement — don't pile on planned topics for it; let them advance.
+- A skill trending 'dipping' or stuck 'steady' at low understanding needs MORE — add a topic that attacks the specific gap/misconception, ideally from a fresh angle.
+- Misconceptions are the strongest 'teach this next' signal — a wrong mental model outranks a merely-missing topic.
+
+Keep planned topics that still serve their current gaps; drop planned topics that are now redundant (a gap closed, or subsumed by something mastered); add 1-4 NEW planned topics their latest gaps/misconceptions/trends reveal they need next — always fitting the target role, never drifting into unrelated domains. Prefer the tradeoff-heavy, failure-mode topics people in this role get wrong. Be surgical, not sweeping — most sessions change little. Return JSON only.`,
         },
         {
           role: "user",
-          content: `Learner's current skill levels:
+          content: `Learner's current skill levels (with recent trend where available):
 ${skillLevels}
 
 Updated profile:

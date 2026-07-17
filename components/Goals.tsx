@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Check, Plus, Target, X } from "lucide-react";
 import { toast } from "./ui/Toast";
+import { cachedGet, invalidate } from "@/lib/fetch-cache";
 
 type Goal = { id: string; title: string; cadence: string; done_today: boolean };
 
@@ -20,9 +21,8 @@ export default function Goals() {
   const [title, setTitle] = useState("");
   const [cadence, setCadence] = useState("daily");
 
-  async function load() {
-    const res = await fetch("/api/goals");
-    const json = await res.json();
+  async function load(force = false) {
+    const json = await cachedGet("/api/goals", { persist: true, force });
     setGoals(json.goals || []);
     setLoading(false);
   }
@@ -37,6 +37,8 @@ export default function Goals() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ goal_id: g.id, done: !g.done_today }),
     });
+    // Drop the persisted copy so a reload reflects the toggle, not stale disk.
+    invalidate("/api/goals");
   }
 
   async function add(t: string, c: string) {
@@ -47,17 +49,19 @@ export default function Goals() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ title: t, cadence: c }),
     });
-    load();
+    invalidate("/api/goals");
+    load(true);
   }
 
   async function remove(id: string) {
     setGoals((gs) => gs.filter((x) => x.id !== id));
     toast("Goal removed");
+    invalidate("/api/goals");
     await fetch("/api/goals", {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ id }),
-    }).catch(() => load());
+    }).catch(() => load(true));
   }
 
   const doneCount = goals.filter((g) => g.done_today).length;

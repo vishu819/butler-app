@@ -6,9 +6,17 @@ import ResetPanel from "./ResetPanel";
 import CountUp from "./ui/CountUp";
 import Plan from "./Plan";
 import SkillRadar from "./viz/SkillRadar";
-import { SlidersHorizontal } from "lucide-react";
+import Sparkline from "./ui/Sparkline";
+import { SlidersHorizontal, TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { cachedGet } from "@/lib/fetch-cache";
 
+type Trend = {
+  spark: number[];
+  deltaUnderstanding: number;
+  deltaLevel: number;
+  direction: "up" | "flat" | "down";
+  sessions: number;
+} | null;
 type Skill = {
   key: string;
   label: string;
@@ -16,6 +24,7 @@ type Skill = {
   proficiency: number;
   seen: number;
   correct: number;
+  trend?: Trend;
 };
 type WeekDay = { date: string; active: boolean };
 type Stats = {
@@ -45,7 +54,7 @@ export default function Profile() {
 
   function load(force = false) {
     setLoading(true);
-    cachedGet("/api/profile", { force })
+    cachedGet("/api/profile", { force, persist: true })
       .then((j) => {
         setSkills(j.skills || []);
         setStats(j.stats || null);
@@ -193,15 +202,36 @@ export default function Profile() {
                 ? "var(--warn)"
                 : "var(--bad)";
             const pctColor = s.seen === 0 ? "var(--on-charcoal-muted)" : color;
+            const t = s.trend;
+            const dirColor =
+              t?.direction === "up" ? "var(--accent-bright)" : t?.direction === "down" ? "var(--bad)" : "var(--on-charcoal-muted)";
+            const DirIcon = t?.direction === "up" ? TrendingUp : t?.direction === "down" ? TrendingDown : Minus;
             return (
               <div key={s.key}>
-                <div className="mb-1.5 flex items-center justify-between">
+                <div className="mb-1.5 flex items-center justify-between gap-3">
                   <span className="text-sm font-medium" style={{ color: "var(--on-charcoal)" }}>
                     {s.label}
                   </span>
-                  <span className="text-sm font-semibold tabular-nums" style={{ color: pctColor }}>
-                    {s.seen === 0 ? "—" : `${s.proficiency}%`}
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {t && (
+                      <>
+                        <Sparkline data={t.spark} color={dirColor} width={56} height={18} />
+                        <span
+                          className="flex items-center gap-0.5 text-xs font-semibold tabular-nums"
+                          style={{ color: dirColor }}
+                          title={`${t.sessions} sessions · understanding ${t.deltaUnderstanding >= 0 ? "+" : ""}${t.deltaUnderstanding}${t.deltaLevel !== 0 ? ` · ${t.deltaLevel > 0 ? "+" : ""}${t.deltaLevel} lvl` : ""}`}
+                        >
+                          <DirIcon size={12} strokeWidth={2.5} />
+                          {t.deltaLevel !== 0
+                            ? `${t.deltaLevel > 0 ? "+" : ""}${t.deltaLevel} lvl`
+                            : `${t.deltaUnderstanding >= 0 ? "+" : ""}${t.deltaUnderstanding}`}
+                        </span>
+                      </>
+                    )}
+                    <span className="text-sm font-semibold tabular-nums" style={{ color: pctColor }}>
+                      {s.seen === 0 ? "—" : `${s.proficiency}%`}
+                    </span>
+                  </div>
                 </div>
                 <div className="bar-dark">
                   <span style={{ width: `${s.seen === 0 ? 4 : s.proficiency}%`, background: color }} />

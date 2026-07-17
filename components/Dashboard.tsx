@@ -27,7 +27,7 @@ import Feed from "./Feed";
 import AccountPanel from "./AccountPanel";
 import StatHeader from "./StatHeader";
 import AvatarMenu from "./AvatarMenu";
-import { cachedGet, prefetch, invalidate } from "@/lib/fetch-cache";
+import { cachedGet, prefetch, invalidate, setCacheOwner } from "@/lib/fetch-cache";
 
 type Tab = "home" | "practice" | "progress" | "coach" | "others";
 type OthersPage = "news" | "papers" | "articles" | "library" | "account";
@@ -49,7 +49,13 @@ const TABS: { key: Tab; label: string; Icon: typeof Home }[] = [
   { key: "others", label: "Others", Icon: LayoutGrid },
 ];
 
-export default function Dashboard({ name, email }: { name: string; email: string }) {
+export default function Dashboard({ name, email, userId }: { name: string; email: string; userId: string }) {
+  // Namespace the persistent (localStorage) cache to THIS user before any
+  // persisted read fires — a shared machine must never surface another
+  // account's cached profile/plan/goals. Runs during first render (before the
+  // mount effect below), and switching users drops the previous cache.
+  useState(() => setCacheOwner(userId));
+
   const [tab, setTab] = useState<Tab>("home");
   const [othersPage, setOthersPage] = useState<OthersPage | null>(null);
   // Long-running Session work (generate / analyze). Session stays mounted so
@@ -64,11 +70,11 @@ export default function Dashboard({ name, email }: { name: string; email: string
   const [stats, setStats] = useState<Stats | null>(null);
   useEffect(() => {
     // CRITICAL for the Home paint: the header stats + today's session.
-    cachedGet("/api/profile")
+    cachedGet("/api/profile", { persist: true })
       .then((j) => j.stats && setStats(j.stats))
       .catch(() => {});
     prefetch("/api/session");
-    prefetch("/api/goals");
+    prefetch("/api/goals", { persist: true });
 
     // Fire immediately (no delay): first-run setup — ensure a baseline profile
     // + build the plan if missing. /api/init is fast (DB checks only); the plan
@@ -77,7 +83,7 @@ export default function Dashboard({ name, email }: { name: string; email: string
       .then((r) => r.json())
       .then((j) => {
         if (!j.needsPlan) {
-          prefetch("/api/plan");
+          prefetch("/api/plan", { persist: true });
           return;
         }
         // Build the curriculum in the BACKGROUND (onboarding entered the app
@@ -94,7 +100,7 @@ export default function Dashboard({ name, email }: { name: string; email: string
             invalidate("/api/plan");
             invalidate("/api/session");
             invalidate("/api/profile");
-            prefetch("/api/plan");
+            prefetch("/api/plan", { persist: true });
           });
       })
       .catch(() => {});

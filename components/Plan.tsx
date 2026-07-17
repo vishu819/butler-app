@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Map, RotateCw } from "lucide-react";
 import PathRoadmap from "./viz/PathRoadmap";
+import { cachedGet, invalidate } from "@/lib/fetch-cache";
 
 type Topic = {
   id: string;
@@ -21,10 +22,9 @@ export default function Plan() {
   const [generating, setGenerating] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
-  function load() {
+  function load(force = false) {
     setLoading(true);
-    fetch("/api/plan")
-      .then((r) => r.json())
+    cachedGet("/api/plan", { persist: true, force })
       .then((j) => {
         setPlan(j.plan || []);
         setNarrative(j.profile?.narrative || null);
@@ -54,8 +54,14 @@ export default function Plan() {
       });
       const text = await res.text();
       const j = text ? JSON.parse(text) : {};
-      if (res.ok) load();
-      else setErr(j.error || `Couldn't update plan (${res.status}).`);
+      if (res.ok) {
+        // The path changed on the server — drop the persisted copy and refetch
+        // so we never render a stale plan after a write. Profile shows mastery
+        // from the same data, so clear it too.
+        invalidate("/api/plan");
+        invalidate("/api/profile");
+        load(true);
+      } else setErr(j.error || `Couldn't update plan (${res.status}).`);
     } catch {
       setErr("Something went wrong. Please try again.");
     } finally {

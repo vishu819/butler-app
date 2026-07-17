@@ -30,7 +30,7 @@ export default async function Home() {
   return (
     <>
       <RegisterSW />
-      <Dashboard name={profile?.name || "there"} email={user.email || ""} />
+      <Dashboard name={profile?.name || "there"} email={user.email || ""} userId={user.id} />
     </>
   );
 }
