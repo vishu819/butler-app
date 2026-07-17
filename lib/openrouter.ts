@@ -81,17 +81,21 @@ export async function* chatStream(
   }
 }
 
-export async function chat(
+type ChatOpts = {
+  model?: string;
+  temperature?: number;
+  json?: boolean;
+  maxTokens?: number;
+  timeoutMs?: number;
+  online?: boolean; // append :online for OpenRouter's built-in web search
+};
+
+// Like chat() but also returns finish_reason so callers can detect a token-limit
+// cutoff ("length") and continue-generate. content is always the text.
+export async function chatWithMeta(
   messages: ChatMessage[],
-  opts: {
-    model?: string;
-    temperature?: number;
-    json?: boolean;
-    maxTokens?: number;
-    timeoutMs?: number;
-    online?: boolean; // append :online for OpenRouter's built-in web search
-  } = {}
-): Promise<string> {
+  opts: ChatOpts = {}
+): Promise<{ content: string; finishReason: string | null }> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw new Error("OPENROUTER_API_KEY is not set");
 
@@ -138,5 +142,14 @@ export async function chat(
   } catch {
     throw new Error("OpenRouter returned a non-JSON response");
   }
-  return data.choices?.[0]?.message?.content ?? "";
+  const choice = data.choices?.[0];
+  return {
+    content: choice?.message?.content ?? "",
+    finishReason: choice?.finish_reason ?? null,
+  };
+}
+
+export async function chat(messages: ChatMessage[], opts: ChatOpts = {}): Promise<string> {
+  const { content } = await chatWithMeta(messages, opts);
+  return content;
 }

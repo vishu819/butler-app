@@ -214,3 +214,22 @@ alter table profiles add column if not exists onboarded boolean not null default
 update profiles p
 set onboarded = true
 where exists (select 1 from curriculum c where c.user_id = p.id);
+
+-- 015_daily_article: deep consolidated study article on daily_learning
+alter table daily_learning add column if not exists article text;
+
+-- 016_article_qa: inline Q&A saved per daily article
+create table if not exists article_questions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  learn_date date not null,
+  selection text,
+  question text not null,
+  answer text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists article_questions_idx
+  on article_questions(user_id, learn_date, created_at);
+alter table article_questions enable row level security;
+create policy "own article_questions" on article_questions for all
+  using (auth.uid() = user_id) with check (auth.uid() = user_id);

@@ -104,6 +104,50 @@ a {
     color: var(--on-charcoal);
     box-shadow: 0 16px 34px -16px rgba(17, 17, 18, 0.45);
   }
+  /* Deep daily study article — typography for the cron-generated HTML. */
+  .deep-article {
+    color: var(--ink);
+    font-size: 0.925rem;
+    line-height: 1.7;
+  }
+  .deep-article h2 {
+    @apply mt-5 mb-2 text-lg font-bold;
+  }
+  .deep-article h3 {
+    @apply mt-4 mb-1.5 text-base font-semibold;
+  }
+  .deep-article p {
+    @apply my-2.5;
+  }
+  .deep-article ul {
+    @apply my-2.5 list-disc space-y-1 pl-5;
+  }
+  .deep-article ol {
+    @apply my-2.5 list-decimal space-y-1 pl-5;
+  }
+  .deep-article strong {
+    font-weight: 600;
+  }
+  .deep-article code {
+    @apply rounded px-1 py-0.5 text-[0.85em];
+    background: var(--accent-soft);
+    color: var(--accent-soft-ink);
+  }
+  .deep-article pre {
+    @apply my-3 overflow-x-auto rounded-2xl p-3 text-[0.82rem] leading-relaxed;
+    background: var(--charcoal);
+    color: var(--on-charcoal);
+  }
+  .deep-article pre code {
+    @apply bg-transparent p-0;
+    color: inherit;
+  }
+  .deep-article > div {
+    @apply my-3 rounded-2xl p-3;
+    background: var(--accent-soft);
+    color: var(--accent-soft-ink);
+  }
+
   /* Raised tile inside a charcoal card */
   .tile-dark {
     @apply rounded-2xl p-3;

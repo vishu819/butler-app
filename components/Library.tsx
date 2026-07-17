@@ -6,8 +6,9 @@ import Mermaid from "./Mermaid";
 import { cachedGet, invalidate } from "@/lib/fetch-cache";
 import { toast } from "./ui/Toast";
 import { Markdown } from "./ui/Markdown";
+import DeepArticle from "./DeepArticle";
 
-type Day = { id: string; learn_date: string; summary: string; concepts: string[]; score: number | null; total: number | null };
+type Day = { id: string; learn_date: string; summary: string; article: string | null; concepts: string[]; score: number | null; total: number | null };
 type Article = { id: string; concept: string; article: string; created_at: string };
 type Diagram = { id: string; concept: string; diagram: string; caption: string | null; created_at: string };
 type Bookmark = { id: string; title: string; url: string; source: string | null; created_at: string };
@@ -117,6 +118,7 @@ export default function Library() {
                   {d.score != null && d.total != null && <span className="chip ml-auto">{d.score}/{d.total}</span>}
                 </div>
                 <Markdown text={d.summary} />
+                {d.article && <DeepArticle learnDate={d.learn_date} html={d.article} />}
               </section>
             ))}
           </div>

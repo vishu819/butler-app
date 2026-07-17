@@ -2,8 +2,11 @@ import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { chat } from "@/lib/openrouter";
 import { BRAIN_CATEGORIES, nextCategory } from "@/lib/brain-gym";
+import { yesterdayKey } from "@/lib/daily-article";
 
 export const runtime = "nodejs";
+// Dispatcher: fast content + chat-memory rollups. Article generation is fanned
+// out to /api/cron/article (one invocation per user), so this stays quick.
 export const maxDuration = 60;
 
 // Generates today's content (eng_q, brain_gym, news) once and caches it.
@@ -112,105 +115,73 @@ export async function GET(req: Request) {
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
   }
 
-  // ---- Per-user rollups: run for EVERY user (multi-user) ----
-  // Each user gets their own daily chat-memory summary + learning digest.
+  // ---- Per-user rollups ----
   const { data: profiles } = await admin.from("profiles").select("id");
   const userIds = (profiles || []).map((p) => p.id).filter(Boolean);
+
+  // The chat-memory summary is fast — do it inline for everyone.
   let summaryOk = 0;
-  let learningOk = 0;
   for (const userId of userIds) {
     try {
       if ((await summarizeYesterday(admin, userId)) === "ok") summaryOk++;
     } catch {
       /* skip this user, keep going */
     }
-    try {
-      if ((await summarizeLearning(admin, userId)) === "ok") learningOk++;
-    } catch {
-      /* skip this user, keep going */
-    }
   }
+
+  // The deep article is heavy — DISPATCH one invocation per user so each gets a
+  // fresh 60s budget (free-tier-safe past one active user). Fire-and-forget:
+  // we only need to skip users with no activity yesterday to avoid waking the
+  // worker for nothing. Idempotency in the worker makes a re-dispatch harmless.
+  const dayKey = yesterdayKey();
+  const dayStart = `${dayKey}T00:00:00.000Z`;
+  const dayEnd = `${dayKey}T23:59:59.999Z`;
+  let dispatched = 0;
+  const base = originFrom(req);
+  const secret = process.env.CRON_SECRET;
+  for (const userId of userIds) {
+    // Cheap pre-check: only dispatch if the user did something yesterday.
+    const [{ count: sCount }, { count: lCount }] = await Promise.all([
+      admin
+        .from("sessions")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .eq("session_date", dayKey),
+      admin
+        .from("learn_articles")
+        .select("id", { count: "exact", head: true })
+        .eq("user_id", userId)
+        .gte("created_at", dayStart)
+        .lte("created_at", dayEnd),
+    ]);
+    if (!sCount && !lCount) continue;
+
+    // Fire-and-forget: don't await the heavy work — it runs in its own invocation.
+    void fetch(`${base}/api/cron/article`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${secret}` },
+      body: JSON.stringify({ userId }),
+    }).catch(() => {});
+    dispatched++;
+  }
+
   results.users = String(userIds.length);
   results.summary = `${summaryOk}/${userIds.length}`;
-  results.learning = `${learningOk}/${userIds.length}`;
+  results.articlesDispatched = String(dispatched);
 
   return NextResponse.json({ date: today, results });
 }
 
-// Review yesterday's session (questions + right/wrong) and write "what you learned today".
-async function summarizeLearning(
-  admin: ReturnType<typeof createAdminClient>,
-  userId: string
-): Promise<string> {
-  const now = new Date();
-  const y = new Date(now);
-  y.setUTCDate(y.getUTCDate() - 1);
-  const dayKey = y.toISOString().slice(0, 10);
-
-  if (!userId) return "skip: no user";
-
-  // Idempotent — already summarized this day?
-  const { data: existing } = await admin
-    .from("daily_learning")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("learn_date", dayKey)
-    .maybeSingle();
-  if (existing) return "exists";
-
-  // Yesterday's session (on-demand Session, replaces the retired eng_q quiz).
-  const { data: session } = await admin
-    .from("sessions")
-    .select("questions, responses")
-    .eq("user_id", userId)
-    .eq("session_date", dayKey)
-    .maybeSingle();
-  if (!session) return "skip: no session";
-
-  const questions = (session.questions || []) as any[];
-  const responses = (session.responses || []) as any[];
-  if (questions.length === 0) return "skip: no questions";
-
-  const answered = new Map<number, any>();
-  for (const r of responses) {
-    answered.set(r.qi, r);
+// Best-effort origin for calling our own sibling endpoint. Prefers an explicit
+// site URL, falls back to the incoming request's host.
+function originFrom(req: Request): string {
+  const site = process.env.NEXT_PUBLIC_SITE_URL || process.env.VERCEL_URL;
+  if (site) return site.startsWith("http") ? site : `https://${site}`;
+  try {
+    return new URL(req.url).origin;
+  } catch {
+    return "http://localhost:3000";
   }
-
-  let score = 0;
-  const qList = questions
-    .map((q, i) => {
-      const r = answered.get(i);
-      const mcqCorrect = r?.mcq_correct;
-      if (mcqCorrect) score++;
-      const fuScore = r?.followup_score != null ? ` (written: ${r.followup_score}/100)` : "";
-      const status = r ? (mcqCorrect ? `✓ got right${fuScore}` : "✗ missed") : "not answered";
-      return `- [${q.concept}] ${q.question} (${status})\n  Key idea: ${q.explanation}`;
-    })
-    .join("\n");
-
-  const summary = await chat(
-    [
-      {
-        role: "system",
-        content:
-          "You write a short 'what you learned today' recap for an engineer studying to become an architect. Given the day's quiz questions, their key ideas, and which the learner got right/wrong, produce an encouraging Markdown recap: a one-line intro, 3-6 bullet takeaways (emphasize concepts they MISSED as things to reinforce), and a one-line 'focus tomorrow'. Concise, concrete, no fluff.",
-      },
-      { role: "user", content: `Date: ${dayKey}\nScore: ${score}/${questions.length}\n\nQuestions:\n${qList}` },
-    ],
-    { temperature: 0.5, maxTokens: 500, timeoutMs: 40000 }
-  );
-
-  const concepts = questions.map((q) => q.concept).filter(Boolean).slice(0, 12);
-  const { error } = await admin.from("daily_learning").insert({
-    user_id: userId,
-    learn_date: dayKey,
-    summary: summary.trim(),
-    concepts,
-    score,
-    total: questions.length,
-  });
-  if (error) return `error: ${error.message}`;
-  return "ok";
 }
 
 // Roll up the previous day's coach conversation into one long-term memory row,
