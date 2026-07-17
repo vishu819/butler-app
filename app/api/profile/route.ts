@@ -5,6 +5,26 @@ import { skillKeysForRole } from "@/lib/roles";
 
 export const runtime = "nodejs";
 
+type HistEntry = { date?: string; level?: number; understanding?: number; verdict?: string };
+
+// Collapse a skill's session history into a compact trend the UI can draw:
+// a small understanding-over-time series (for the sparkline) plus the deltas
+// and overall direction (for the chip). Tiny payload — a handful of ints.
+function deriveTrend(history: HistEntry[]) {
+  const h = (history || []).filter((x) => typeof x?.understanding === "number");
+  if (h.length < 2) return null; // no meaningful trend yet
+  const spark = h.slice(-8).map((x) => Math.max(0, Math.min(100, Math.round(x.understanding ?? 0))));
+  const first = h[0];
+  const last = h[h.length - 1];
+  const deltaUnderstanding = (last.understanding ?? 0) - (first.understanding ?? 0);
+  const deltaLevel = (last.level ?? 1) - (first.level ?? 1);
+  // Direction from the slope of the last few points.
+  const tail = h.slice(-3);
+  const slope = (tail[tail.length - 1].understanding ?? 0) - (tail[0].understanding ?? 0);
+  const direction: "up" | "flat" | "down" = slope > 8 ? "up" : slope < -8 ? "down" : "flat";
+  return { spark, deltaUnderstanding, deltaLevel, direction, sessions: h.length };
+}
+
 // GET -> the user's skill map for THEIR role (every role skill, defaults for
 // untested ones).
 export async function GET() {
@@ -17,7 +37,7 @@ export async function GET() {
   const [{ data }, { data: profileRow }] = await Promise.all([
     supabase
       .from("skill_profile")
-      .select("skill, level, proficiency, seen, correct")
+      .select("skill, level, proficiency, seen, correct, history")
       .eq("user_id", user.id),
     supabase.from("profiles").select("target_role").eq("id", user.id).maybeSingle(),
   ]);
@@ -33,6 +53,7 @@ export async function GET() {
       proficiency: r?.proficiency ?? 0,
       seen: r?.seen ?? 0,
       correct: r?.correct ?? 0,
+      trend: deriveTrend((r?.history as HistEntry[]) || []),
     };
   });
 
