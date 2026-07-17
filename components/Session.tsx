@@ -417,17 +417,19 @@ export default function Session({
   const remaining = questions.length - answeredCount;
 
   // Collapsed summary card — lime "Today's session" with an arrow (matches render).
-  // Shown until the user opens the flow. Once complete, we skip straight to the
-  // expanded view so the analysis banner is visible.
-  if (!open && status !== "complete") {
+  // Shown until the user opens the flow. Now shown even when the session is
+  // COMPLETE (all ticks ✓ + a results link) so it's always visible on open and
+  // any question can be reopened for review.
+  if (!open) {
+    const isComplete = status === "complete";
     const done = answeredCount > 0;
     const answeredSet = new Set(responses.map((r) => r.qi));
     const firstUnanswered = questions.findIndex((_, i) => !answeredSet.has(i));
     return (
       <div className="card-lime animate-fade-up">
-        {/* Tap the header to open at the first remaining question */}
+        {/* Tap the header: complete → open results view; otherwise → first remaining */}
         <button
-          onClick={() => jumpTo(firstUnanswered === -1 ? 0 : firstUnanswered)}
+          onClick={() => (isComplete ? setOpen(true) : jumpTo(firstUnanswered === -1 ? 0 : firstUnanswered))}
           className="flex w-full items-center justify-between text-left transition-transform active:scale-[.99]"
         >
           <div>
@@ -435,7 +437,11 @@ export default function Session({
               Today&apos;s session
             </p>
             <p className="mt-0.5 text-lg font-bold leading-tight">
-              {done ? `${remaining} question${remaining === 1 ? "" : "s"} left` : `${questions.length} questions ready`}
+              {isComplete
+                ? "Completed today ✓"
+                : done
+                ? `${remaining} question${remaining === 1 ? "" : "s"} left`
+                : `${questions.length} questions ready`}
             </p>
           </div>
           <span
@@ -446,17 +452,17 @@ export default function Session({
           </span>
         </button>
 
-        {/* Per-question tick strip — jump straight to any question */}
+        {/* Per-question tick strip — jump straight to any question (also to review) */}
         {questions.length > 0 && (
           <div className="mt-3 flex flex-wrap items-center gap-1.5">
             {questions.map((_, i) => {
               const isAnswered = answeredSet.has(i);
-              const isNext = i === firstUnanswered;
+              const isNext = !isComplete && i === firstUnanswered;
               return (
                 <button
                   key={i}
                   onClick={() => jumpTo(i)}
-                  title={`Question ${i + 1}${isAnswered ? " — answered" : isNext ? " — up next" : ""}`}
+                  title={`Question ${i + 1}${isAnswered ? " — answered (tap to review)" : isNext ? " — up next" : ""}`}
                   className="flex h-7 w-7 items-center justify-center rounded-full text-[11px] font-bold transition-transform active:scale-90"
                   style={
                     isAnswered
@@ -475,14 +481,26 @@ export default function Session({
             </span>
           </div>
         )}
+
+        {/* When complete, a clear link into the results & analysis view */}
+        {isComplete && (
+          <button
+            onClick={() => setOpen(true)}
+            className="mt-3 w-full rounded-xl py-2 text-sm font-semibold transition-transform active:scale-[.99]"
+            style={{ background: "var(--charcoal)", color: "var(--accent-bright)" }}
+          >
+            View results &amp; analysis
+          </button>
+        )}
       </div>
     );
   }
 
   return (
     <div className="space-y-3 animate-fade-up">
-      {/* Collapse back to the summary card */}
-      {status !== "complete" && (
+      {/* Collapse back to the summary card — available even when complete so the
+          user can return to the collapsed card after reviewing results. */}
+      {(
         <button
           onClick={() => setOpen(false)}
           className="text-xs font-medium"
