@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { createAdminClient } from "@/lib/supabase/admin";
-import { chat } from "@/lib/openrouter";
+import { chat, chatWithMeta } from "@/lib/openrouter";
 import { modelFor } from "@/lib/models";
 import { BRAIN_CATEGORIES, nextCategory } from "@/lib/brain-gym";
 
@@ -252,12 +252,16 @@ async function summarizeLearning(
         .join("\n\n")
     : "(none)";
 
-  // ---- One heavy LLM call → deep, consolidated HTML study article ----
-  const article = await chat(
-    [
-      {
-        role: "system",
-        content: `You are Butler, an elite mentor writing a learner's DAILY DEEP-DIVE study article — the one thing they must not skip. The learner is training toward "${targetRole}". Consolidate everything they touched yesterday into ONE cohesive, rigorous article that takes them from foundations up to ${targetRole}-level depth on exactly the concepts they engaged with — with SPECIAL FOCUS on what they got wrong or skipped (those are the gaps to close).
+  // ---- Heavy LLM call → deep, consolidated HTML study article ----
+  // We tell the model to end with a sentinel (<!--END-->) so we can tell a
+  // finished article from one the token limit cut off mid-sentence. If it's cut
+  // off, we continue-generate (append the partial + ask it to resume) and stitch
+  // — up to a few rounds — so the article is never left dangling.
+  const END = "<!--END-->";
+  const articleMessages: { role: "system" | "user" | "assistant"; content: string }[] = [
+    {
+      role: "system",
+      content: `You are Butler, an elite mentor writing a learner's DAILY DEEP-DIVE study article — the one thing they must not skip. The learner is training toward "${targetRole}". Consolidate everything they touched yesterday into ONE cohesive, rigorous article that takes them from foundations up to ${targetRole}-level depth on exactly the concepts they engaged with — with SPECIAL FOCUS on what they got wrong or skipped (those are the gaps to close).
 
 Write real, substantive teaching — not a recap. For each key concept: explain it from first principles, then go deep into the tradeoffs, failure modes, and real-world decisions a senior/${targetRole} engineer must reason about. Use concrete numbers, worked examples, and short code snippets where they clarify. Weave in and EXPAND the "Learn this topic" articles they opened so this becomes the single consolidated read.
 
@@ -268,11 +272,11 @@ Output valid semantic HTML only (no markdown, no <html>/<head>/<body> wrapper, n
 2. A <div> callout listing what they MISSED or SKIPPED and why it matters most.
 3. One <h2> section per key concept — foundations → depth → ${targetRole}-level tradeoffs → common mistakes.
 4. <h2>Don't miss this</h2> — the 5-8 highest-leverage takeaways.
-Return ONLY the HTML.`,
-      },
-      {
-        role: "user",
-        content: `Date: ${dayKey}
+When the article is fully complete, output the exact marker ${END} on its own line as the very last thing. Return ONLY the HTML (plus that final marker).`,
+    },
+    {
+      role: "user",
+      content: `Date: ${dayKey}
 Session score: ${questions.length ? `${score}/${questions.length}` : "no session"}
 Concepts MISSED (wrong): ${missed.join(", ") || "none"}
 Concepts SKIPPED (not answered): ${skipped.join(", ") || "none"}
@@ -283,12 +287,34 @@ ${qList || "(no session)"}
 
 === "Learn this topic" articles they opened yesterday (consolidate & expand these) ===
 ${learnBrief}`,
-      },
-    ],
-    // Bounded to fit Vercel's 60s Hobby function cap: deep but focused (3-5
-    // concepts), ~4500 tokens, returns comfortably under the timeout.
-    { model: modelFor("generate"), temperature: 0.6, maxTokens: 4500, timeoutMs: 48000 }
-  );
+    },
+  ];
+
+  let article = "";
+  // maxDuration is 60s (Hobby); leave headroom for the summary call + insert.
+  const articleDeadline = Date.now() + 50_000;
+  for (let round = 0; round < 4; round++) {
+    const { content, finishReason } = await chatWithMeta(articleMessages, {
+      model: modelFor("generate"),
+      temperature: 0.6,
+      maxTokens: 4000,
+      timeoutMs: 45000,
+    });
+    article += content;
+    // Done if the model emitted the sentinel or stopped naturally.
+    if (article.includes(END) || finishReason === "stop") break;
+    // Only a token-limit cutoff ("length") warrants a continue; anything else, stop.
+    if (finishReason !== "length") break;
+    if (Date.now() > articleDeadline) break; // out of time budget — ship what we have
+    // Continue from exactly where it left off.
+    articleMessages.push({ role: "assistant", content });
+    articleMessages.push({
+      role: "user",
+      content: `Continue the HTML article from exactly where you stopped — do not repeat anything already written, do not add a preamble, just resume mid-flow. Remember to end with ${END} when fully done.`,
+    });
+  }
+  // Strip the completion sentinel before we store/render.
+  article = article.split(END)[0].trimEnd();
 
   // Short markdown teaser (kept in `summary`) so the Library list stays scannable.
   const summary = await chat(
