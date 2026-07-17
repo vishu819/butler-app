@@ -1,13 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Calendar, Sparkles, Trash2, ExternalLink } from "lucide-react";
+import { Calendar, Sparkles, Trash2, ExternalLink, BookOpen } from "lucide-react";
 import Mermaid from "./Mermaid";
 import { cachedGet, invalidate } from "@/lib/fetch-cache";
 import { toast } from "./ui/Toast";
 import { Markdown } from "./ui/Markdown";
 
-type Day = { id: string; learn_date: string; summary: string; concepts: string[]; score: number | null; total: number | null };
+type Day = { id: string; learn_date: string; summary: string; article: string | null; concepts: string[]; score: number | null; total: number | null };
 type Article = { id: string; concept: string; article: string; created_at: string };
 type Diagram = { id: string; concept: string; diagram: string; caption: string | null; created_at: string };
 type Bookmark = { id: string; title: string; url: string; source: string | null; created_at: string };
@@ -117,6 +117,24 @@ export default function Library() {
                   {d.score != null && d.total != null && <span className="chip ml-auto">{d.score}/{d.total}</span>}
                 </div>
                 <Markdown text={d.summary} />
+                {d.article && (
+                  <details className="mt-3 rounded-2xl border" style={{ borderColor: "var(--line)" }}>
+                    <summary
+                      className="flex cursor-pointer items-center gap-2 px-3 py-2.5 text-sm font-semibold"
+                      style={{ color: "var(--accent)" }}
+                    >
+                      <BookOpen size={15} />
+                      <span className="flex-1">Read the deep dive</span>
+                      <span className="text-xs font-normal" style={{ color: "var(--muted)" }}>
+                        the read you shouldn&apos;t miss
+                      </span>
+                    </summary>
+                    <div
+                      className="deep-article px-3 pb-3 pt-1"
+                      dangerouslySetInnerHTML={{ __html: d.article }}
+                    />
+                  </details>
+                )}
               </section>
             ))}
           </div>

@@ -13,7 +13,7 @@ export async function GET() {
 
   const { data } = await supabase
     .from("daily_learning")
-    .select("id, learn_date, summary, concepts, score, total")
+    .select("id, learn_date, summary, article, concepts, score, total")
     .eq("user_id", user.id)
     .order("learn_date", { ascending: false })
     .limit(60);

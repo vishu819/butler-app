@@ -214,3 +214,6 @@ alter table profiles add column if not exists onboarded boolean not null default
 update profiles p
 set onboarded = true
 where exists (select 1 from curriculum c where c.user_id = p.id);
+
+-- 015_daily_article: deep consolidated study article on daily_learning
+alter table daily_learning add column if not exists article text;
