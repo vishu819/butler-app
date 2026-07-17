@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { BookOpen, Send, MessageCircleQuestion, Sparkles } from "lucide-react";
+import { BookOpen, Send, MessageCircleQuestion, Sparkles, ChevronDown } from "lucide-react";
 import { Markdown } from "./ui/Markdown";
 
 type QA = { id?: string; selection?: string | null; question: string; answer: string };
@@ -24,6 +24,7 @@ export default function DeepArticle({
   const [asking, setAsking] = useState(false);
   const [streaming, setStreaming] = useState<QA | null>(null);
   const [askBtn, setAskBtn] = useState<{ x: number; y: number; text: string } | null>(null);
+  const [threadOpen, setThreadOpen] = useState(true); // collapse the Q&A thread
 
   const articleRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -75,6 +76,7 @@ export default function DeepArticle({
     const question = q.trim();
     if (!question || asking) return;
     setAsking(true);
+    setThreadOpen(true); // reveal the thread so the streaming answer is visible
     setQ("");
     const pending: QA = { question, selection: selection || null, answer: "" };
     setStreaming(pending);
@@ -144,11 +146,30 @@ export default function DeepArticle({
 
       {/* Q&A thread */}
       <div className="border-t px-3 py-3" style={{ borderColor: "var(--line)" }}>
-        <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--muted)" }}>
-          <Sparkles size={13} /> Ask Butler about this article
-        </p>
+        {thread.length > 0 ? (
+          <button
+            onClick={() => setThreadOpen((v) => !v)}
+            className="mb-2 flex w-full items-center gap-1.5 text-xs font-semibold"
+            style={{ color: "var(--muted)" }}
+          >
+            <Sparkles size={13} />
+            <span className="flex-1 text-left">
+              Ask Butler about this article
+              <span className="ml-1 font-normal">· {thread.length} saved</span>
+            </span>
+            <ChevronDown
+              size={15}
+              className="transition-transform"
+              style={{ transform: threadOpen ? "rotate(180deg)" : "none" }}
+            />
+          </button>
+        ) : (
+          <p className="mb-2 flex items-center gap-1.5 text-xs font-semibold" style={{ color: "var(--muted)" }}>
+            <Sparkles size={13} /> Ask Butler about this article
+          </p>
+        )}
 
-        {(thread.length > 0 || streaming) && (
+        {threadOpen && (thread.length > 0 || streaming) && (
           <div className="mb-3 space-y-3">
             {thread.map((qa, i) => (
               <QaBubble key={qa.id || i} qa={qa} />
